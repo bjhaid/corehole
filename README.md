@@ -17,6 +17,17 @@ blocklists, and subscribed lists managed from SQLite. It blocks matching
 queries, forwards everything else to the configured upstream resolvers, and
 records DNS audit events in SQLite.
 
+## Why
+
+Corehole exists because Pi-hole-style DNS filtering is useful, but Pi-hole
+deployments involve multiple runtime pieces such as Pi-hole itself, FTLDNS with
+its embedded dnsmasq-based resolver, a web server like lighttpd or another
+external server, and PHP; Corehole packages forwarding DNS, filtering, the admin
+console, configuration, API keys, audit logging, analytics, and SQLite storage
+into one standalone binary so install and upgrade are mostly a binary
+replacement instead of coordinating OS packages that may not stay compatible
+with the host distribution.
+
 ## Quick Start
 
 Run corehole with the example configuration:
@@ -50,8 +61,8 @@ corehole version
 On first run for a SQLite database, the console asks you to create the first
 admin password. Admin users and API keys are persisted in the configured
 SQLite database and survive restarts as long as `storage.path` points at the
-same database. Browser sessions are still process-local, so you may need to log
-in again after restarting corehole. After login, the console shows dashboard
+same database. Browser sessions are stored in SQLite and survive restarts until
+they expire or are explicitly logged out. After login, the console shows dashboard
 cards, DNS and admin listener details, upstream resolvers, blocking
 configuration and blocklists, audit counts, query logs, analytics, clients and
 groups, local DNS, settings, and API keys.
