@@ -211,11 +211,18 @@ func (r *Repository) ReplaceListEntries(ctx context.Context, listID int64, entri
 	if _, err := tx.ExecContext(ctx, "DELETE FROM filter_list_entries WHERE list_id = ?", listID); err != nil {
 		return List{}, fmt.Errorf("clear filter list entries: %w", err)
 	}
-	for _, entry := range entries {
-		if _, err := tx.ExecContext(ctx, `
+	stmt, err := tx.PrepareContext(ctx, `
 INSERT OR IGNORE INTO filter_list_entries (list_id, pattern, match_type, enabled)
-VALUES (?, ?, ?, ?)`,
-			entry.ListID, entry.Pattern, entry.MatchType, boolInt(entry.Enabled)); err != nil {
+VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return List{}, fmt.Errorf("prepare filter list entry replace: %w", err)
+	}
+	defer stmt.Close()
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return List{}, err
+		}
+		if _, err := stmt.ExecContext(ctx, entry.ListID, entry.Pattern, entry.MatchType, boolInt(entry.Enabled)); err != nil {
 			return List{}, fmt.Errorf("replace filter list entry: %w", err)
 		}
 	}
