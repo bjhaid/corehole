@@ -43,6 +43,8 @@ The built-in defaults are enough for a first run:
 - Upstream resolver: Cloudflare at `1.1.1.1:53`
 - SQLite storage: `./corehole.db`
 - Blocking: bundled seed blocklist enabled, blocked responses return `NXDOMAIN`
+- DNS cache: 30 second TTL cap, 32,768 successful-response entries, and 4,096
+  denial/failure entries
 
 Binding DNS port 53 usually requires root/admin privileges or a service manager
 capability such as `CAP_NET_BIND_SERVICE`. For unprivileged local development,

@@ -33,6 +33,29 @@
               <div id="dnssec-message" class="status-line dnssec-message" role="status" aria-live="polite"></div>
             </article>
 
+            <article class="panel">
+              <div class="panel-header">
+                <h3>DNS cache</h3>
+                <span id="cache-state">--</span>
+              </div>
+              <form id="cache-form" class="control-box cache-form">
+                <div>
+                  <label for="cache-ttl">TTL cap seconds</label>
+                  <input id="cache-ttl" name="cache_ttl" type="number" min="0" step="1" required>
+                </div>
+                <div>
+                  <label for="cache-success-capacity">Success capacity</label>
+                  <input id="cache-success-capacity" name="cache_success_capacity" type="number" min="1024" step="256" required>
+                </div>
+                <div>
+                  <label for="cache-denial-capacity">Failure capacity</label>
+                  <input id="cache-denial-capacity" name="cache_denial_capacity" type="number" min="1024" step="256" required>
+                </div>
+                <button id="cache-save" type="submit">Save cache</button>
+              </form>
+              <div id="cache-message" class="status-line cache-message" role="status" aria-live="polite"></div>
+            </article>
+
             <article class="panel settings-upstream-panel">
               <div class="panel-header">
                 <h3>Upstream resolvers</h3>

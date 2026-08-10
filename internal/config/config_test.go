@@ -25,6 +25,12 @@ func TestDefaultDNSListenUsesStandardPort(t *testing.T) {
 	if cfg.DNS.CacheTTL != 30 {
 		t.Fatalf("default dns.cache_ttl = %d, want 30", cfg.DNS.CacheTTL)
 	}
+	if cfg.DNS.CacheSuccessCapacity != 32768 {
+		t.Fatalf("default dns.cache_success_capacity = %d, want 32768", cfg.DNS.CacheSuccessCapacity)
+	}
+	if cfg.DNS.CacheDenialCapacity != 4096 {
+		t.Fatalf("default dns.cache_denial_capacity = %d, want 4096", cfg.DNS.CacheDenialCapacity)
+	}
 	if cfg.DNS.DNSSEC.Enabled {
 		t.Fatal("default dns.dnssec.enabled = true, want false")
 	}
@@ -115,9 +121,26 @@ func TestValidateConditionalForwarding(t *testing.T) {
 func TestValidateAllowsZeroCacheTTL(t *testing.T) {
 	cfg := Default()
 	cfg.DNS.CacheTTL = 0
+	cfg.DNS.CacheSuccessCapacity = 0
+	cfg.DNS.CacheDenialCapacity = 0
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsTooSmallCacheCapacity(t *testing.T) {
+	cfg := Default()
+	cfg.DNS.CacheSuccessCapacity = 512
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want small success cache capacity error")
+	}
+
+	cfg = Default()
+	cfg.DNS.CacheDenialCapacity = 512
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want small denial cache capacity error")
 	}
 }
 

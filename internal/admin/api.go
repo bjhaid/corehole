@@ -119,6 +119,8 @@ type ConfigSnapshot struct {
 	AdminListen           string
 	Upstreams             []UpstreamSnapshot
 	CacheTTL              int
+	CacheSuccessCapacity  int
+	CacheDenialCapacity   int
 	DNSSEC                DNSSECSnapshot
 	ConditionalForwarding ConditionalForwardingSnapshot
 	BlockingResponse      string
@@ -139,6 +141,8 @@ type DNSConfigUpdate struct {
 	Listen                *string                      `json:"listen,omitempty"`
 	Resolvers             *[]ResolverUpdate            `json:"resolvers,omitempty"`
 	CacheTTL              *int                         `json:"cache_ttl,omitempty"`
+	CacheSuccessCapacity  *int                         `json:"cache_success_capacity,omitempty"`
+	CacheDenialCapacity   *int                         `json:"cache_denial_capacity,omitempty"`
 	DNSSEC                *DNSSECUpdate                `json:"dnssec,omitempty"`
 	ConditionalForwarding *ConditionalForwardingUpdate `json:"conditional_forwarding,omitempty"`
 }
@@ -259,6 +263,8 @@ type configResponse struct {
 	AdminListen           string                        `json:"admin_listen"`
 	Upstreams             []UpstreamSnapshot            `json:"upstreams"`
 	CacheTTL              int                           `json:"cache_ttl"`
+	CacheSuccessCapacity  int                           `json:"cache_success_capacity"`
+	CacheDenialCapacity   int                           `json:"cache_denial_capacity"`
 	DNSSEC                DNSSECSnapshot                `json:"dnssec"`
 	ConditionalForwarding ConditionalForwardingSnapshot `json:"conditional_forwarding"`
 	BlockingResponse      string                        `json:"blocking_response"`
@@ -617,11 +623,15 @@ func (s *Server) queryAuditEventsPage(ctx context.Context, opts audit.QueryOptio
 
 func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 	if s.configSource == nil {
+		defaultConfig := config.Default()
 		return ConfigSnapshot{
-			BlockingBundled: config.Default().Blocking.Bundled,
-			DNSSEC:          DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},
-			Upstreams:       []UpstreamSnapshot{},
-			Blocklists:      []string{},
+			CacheTTL:             defaultConfig.DNS.CacheTTL,
+			CacheSuccessCapacity: defaultConfig.DNS.CacheSuccessCapacity,
+			CacheDenialCapacity:  defaultConfig.DNS.CacheDenialCapacity,
+			BlockingBundled:      defaultConfig.Blocking.Bundled,
+			DNSSEC:               DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},
+			Upstreams:            []UpstreamSnapshot{},
+			Blocklists:           []string{},
 		}, nil
 	}
 	snapshot, err := s.configSource.Snapshot(ctx)
@@ -640,6 +650,8 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 		AdminListen:           snapshot.AdminListen,
 		Upstreams:             cloneUpstreams(snapshot.Upstreams),
 		CacheTTL:              snapshot.CacheTTL,
+		CacheSuccessCapacity:  snapshot.CacheSuccessCapacity,
+		CacheDenialCapacity:   snapshot.CacheDenialCapacity,
 		DNSSEC:                snapshot.DNSSEC,
 		ConditionalForwarding: snapshot.ConditionalForwarding,
 		BlockingResponse:      snapshot.BlockingResponse,
@@ -705,6 +717,12 @@ func applyConfigUpdate(cfg config.Config, req ConfigUpdateRequest) config.Config
 		}
 		if req.DNS.CacheTTL != nil {
 			cfg.DNS.CacheTTL = *req.DNS.CacheTTL
+		}
+		if req.DNS.CacheSuccessCapacity != nil {
+			cfg.DNS.CacheSuccessCapacity = *req.DNS.CacheSuccessCapacity
+		}
+		if req.DNS.CacheDenialCapacity != nil {
+			cfg.DNS.CacheDenialCapacity = *req.DNS.CacheDenialCapacity
 		}
 		if req.DNS.DNSSEC != nil {
 			cfg.DNS.DNSSEC = dnssecUpdateToConfig(cfg.DNS.DNSSEC, *req.DNS.DNSSEC)
@@ -814,10 +832,12 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 	}
 
 	return ConfigSnapshot{
-		DNSListen:   cfg.DNS.Listen,
-		AdminListen: cfg.Admin.Listen,
-		Upstreams:   upstreams,
-		CacheTTL:    cfg.DNS.CacheTTL,
+		DNSListen:            cfg.DNS.Listen,
+		AdminListen:          cfg.Admin.Listen,
+		Upstreams:            upstreams,
+		CacheTTL:             cfg.DNS.CacheTTL,
+		CacheSuccessCapacity: cfg.DNS.CacheSuccessCapacity,
+		CacheDenialCapacity:  cfg.DNS.CacheDenialCapacity,
 		DNSSEC: DNSSECSnapshot{
 			Enabled: cfg.DNS.DNSSEC.Enabled,
 			Mode:    string(cfg.DNS.DNSSEC.EffectiveMode()),

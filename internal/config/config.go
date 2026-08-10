@@ -22,6 +22,8 @@ type DNSConfig struct {
 	Listen                string                `yaml:"listen" json:"listen"`
 	Resolvers             []Resolver            `yaml:"resolvers" json:"resolvers"`
 	CacheTTL              int                   `yaml:"cache_ttl" json:"cache_ttl"`
+	CacheSuccessCapacity  int                   `yaml:"cache_success_capacity" json:"cache_success_capacity"`
+	CacheDenialCapacity   int                   `yaml:"cache_denial_capacity" json:"cache_denial_capacity"`
 	DNSSEC                DNSSECConfig          `yaml:"dnssec" json:"dnssec"`
 	ConditionalForwarding ConditionalForwarding `yaml:"conditional_forwarding" json:"conditional_forwarding"`
 }
@@ -73,8 +75,10 @@ type BlockingConfig struct {
 func Default() Config {
 	return Config{
 		DNS: DNSConfig{
-			CacheTTL: 30,
-			Listen:   ":53",
+			CacheTTL:             30,
+			CacheSuccessCapacity: 32768,
+			CacheDenialCapacity:  4096,
+			Listen:               ":53",
 			DNSSEC: DNSSECConfig{
 				Enabled: false,
 				Mode:    DNSSECModeOff,
@@ -135,6 +139,14 @@ func (c Config) Validate() error {
 	}
 	if c.DNS.CacheTTL < 0 {
 		return errors.New("dns.cache_ttl must be 0 or greater")
+	}
+	if c.DNS.CacheTTL > 0 {
+		if c.DNS.CacheSuccessCapacity < 1024 {
+			return errors.New("dns.cache_success_capacity must be at least 1024 when cache is enabled")
+		}
+		if c.DNS.CacheDenialCapacity < 1024 {
+			return errors.New("dns.cache_denial_capacity must be at least 1024 when cache is enabled")
+		}
 	}
 	if err := c.DNS.DNSSEC.Validate(); err != nil {
 		return err

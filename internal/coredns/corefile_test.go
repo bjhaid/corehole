@@ -23,10 +23,13 @@ func TestCorefileUsesCoreDNSZonePortSyntax(t *testing.T) {
 func TestCorefileUsesConfiguredCacheTTL(t *testing.T) {
 	cfg := config.Default()
 	cfg.DNS.CacheTTL = 300
+	cfg.DNS.CacheSuccessCapacity = 65536
+	cfg.DNS.CacheDenialCapacity = 4096
 
 	got := Corefile(cfg)
-	if !strings.Contains(got, "    cache 300\n") {
-		t.Fatalf("Corefile() = %q, want configured cache TTL", got)
+	want := "    cache 300 {\n        success 65536 300\n        denial 4096 300\n    }\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("Corefile() = %q, want configured cache block %q", got, want)
 	}
 }
 

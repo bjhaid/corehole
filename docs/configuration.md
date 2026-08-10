@@ -25,7 +25,9 @@ config source and active blocklist count.
 | `dns.resolvers[].protocol` | string | `"udp"` on the built-in default resolver; `""` for resolver objects you add without a protocol | `""`, `"udp"`, `"dns"`, `"tcp"`, `"tls"`, or `"https"` for enabled resolvers | Controls generated CoreDNS forwarding where practical. `udp`, `dns`, or empty uses normal CoreDNS DNS forwarding. `tls` emits `tls://` when the address has no scheme. `https` emits `https://` when the address has no scheme. `tcp` emits a `force_tcp` forwarding block; because CoreDNS applies `force_tcp` to the whole `forward` stanza, enabled `tcp` resolvers cannot be mixed with enabled non-TCP resolvers. |
 | `dns.resolvers[].tls_server_name` | string | `""` | Must not contain whitespace or braces | Used with `protocol: tls` to emit CoreDNS per-upstream TLS server name syntax, for example `tls://9.9.9.9%dns.quad9.net:853`. This value is now included in admin config snapshots when present. |
 | `dns.resolvers[].enabled` | boolean | `true` on the built-in default resolver; `false` for resolver objects you add without `enabled` in YAML | `true` or `false` | Only enabled resolvers are used. YAML resolver objects should set `enabled: true` unless the resolver is intentionally disabled. |
-| `dns.cache_ttl` | integer seconds | `30` | `0` or greater | Caps CoreDNS cache duration for DNS responses. `0` omits the CoreDNS `cache` directive and disables corehole's generated DNS cache. Positive values emit `cache <seconds>`. Restart required. |
+| `dns.cache_ttl` | integer seconds | `30` | `0` or greater | Caps CoreDNS cache duration for DNS responses. `0` omits the CoreDNS `cache` directive and disables corehole's generated DNS cache. Positive values emit a CoreDNS `cache` block. |
+| `dns.cache_success_capacity` | integer entries | `32768` | `1024` or greater when `dns.cache_ttl` is positive | Capacity for cached successful responses. CoreDNS divides capacity across 256 shards and rounds configured capacity down to a multiple of 256. |
+| `dns.cache_denial_capacity` | integer entries | `4096` | `1024` or greater when `dns.cache_ttl` is positive | Capacity for cached denial/failure responses such as NXDOMAIN/NODATA. This is intentionally lower than successful-response capacity by default. CoreDNS does not cache generic error responses. |
 | `dns.dnssec.enabled` | boolean | `false` | `true` or `false` | Enables DNSSEC upstream assistance when paired with `mode: upstream`. When disabled, use `mode: off`. |
 | `dns.dnssec.mode` | string | `"off"` | `"off"`, `"upstream"`, or empty when `enabled: true` | `off` disables DNSSEC assistance. `upstream` sends DNSSEC request flags upstream and preserves validated upstream AD status for clients that request it. Empty mode with `enabled: true` is treated as `upstream`. `local` is not implemented and is rejected. |
 | `dns.conditional_forwarding.enabled` | boolean | `false` | `true` or `false` | Enables one local-domain/reverse-zone conditional forwarding rule before the default `forward .` rule. |
@@ -63,6 +65,8 @@ Fields read at startup by the running application:
   `forward .` line; restart required after YAML changes.
 - `dns.cache_ttl`: used to build the CoreDNS `cache` directive; restart
   required after YAML changes.
+- `dns.cache_success_capacity` and `dns.cache_denial_capacity`: used inside the
+  generated CoreDNS `cache` block; restart required after YAML changes.
 - `dns.dnssec`: used to add corehole's upstream DNSSEC helper before CoreDNS
   forwarding; restart required after YAML changes.
 - `dns.conditional_forwarding`: used to build a conditional CoreDNS `forward`
@@ -93,6 +97,8 @@ table:
 - `dns.listen`
 - `dns.resolvers`
 - `dns.cache_ttl`
+- `dns.cache_success_capacity`
+- `dns.cache_denial_capacity`
 - `dns.dnssec`
 - `dns.conditional_forwarding`
 - `admin.listen`
@@ -127,6 +133,8 @@ Startup validation fails when:
 - an enabled resolver uses an unsupported `protocol`.
 - enabled TCP resolvers are mixed with enabled non-TCP resolvers.
 - `dns.cache_ttl` is negative.
+- `dns.cache_success_capacity` or `dns.cache_denial_capacity` is below `1024`
+  while `dns.cache_ttl` is positive.
 - `dns.dnssec.enabled` is true without `mode: upstream`.
 - `dns.dnssec.mode` is `upstream` while `enabled` is false.
 - `dns.dnssec.mode` is any unsupported value, including `local`.
@@ -171,6 +179,8 @@ non-privileged local development port:
 dns:
   listen: ":1053"
   cache_ttl: 30
+  cache_success_capacity: 32768
+  cache_denial_capacity: 4096
   dnssec:
     enabled: false
     mode: off
@@ -216,6 +226,8 @@ the right capability.
 dns:
   listen: ":53"
   cache_ttl: 300
+  cache_success_capacity: 65536
+  cache_denial_capacity: 8192
   dnssec:
     enabled: true
     mode: upstream

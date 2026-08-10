@@ -15,6 +15,12 @@ function fields() {
     dnssecMode: required("#dnssec-mode"),
     dnssecMessage: required("#dnssec-message"),
     dnssecNote: required("#dnssec-note"),
+    cacheState: required("#cache-state"),
+    cacheForm: required("#cache-form"),
+    cacheTTL: required("#cache-ttl"),
+    cacheSuccessCapacity: required("#cache-success-capacity"),
+    cacheDenialCapacity: required("#cache-denial-capacity"),
+    cacheMessage: required("#cache-message"),
     upstreamCount: required("#upstream-count"),
     upstreamForm: required("#upstream-form"),
     upstreamIndex: required("#upstream-index"),
@@ -83,6 +89,11 @@ initAdminPage({
       target.dnssecMessage.classList.toggle("error", Boolean(isError));
     }
 
+    function setCacheMessage(text, isError) {
+      target.cacheMessage.textContent = text || "";
+      target.cacheMessage.classList.toggle("error", Boolean(isError));
+    }
+
     function setAPIKeyMessage(text, isError) {
       target.apiKeySecret.textContent = text || "";
       target.apiKeySecret.classList.toggle("error", Boolean(isError));
@@ -109,6 +120,19 @@ initAdminPage({
       setFormDisabled(target.dnssecForm, !configUpdateAvailable);
     }
 
+    function renderCache(data) {
+      const ttl = Number(pick(data, ["cache_ttl", "cacheTTL", "dns.cache_ttl"]) || 0);
+      const successCapacity = Number(pick(data, ["cache_success_capacity", "cacheSuccessCapacity", "dns.cache_success_capacity"]) || 32768);
+      const denialCapacity = Number(pick(data, ["cache_denial_capacity", "cacheDenialCapacity", "dns.cache_denial_capacity"]) || 4096);
+      target.cacheTTL.value = String(ttl);
+      target.cacheSuccessCapacity.value = String(successCapacity);
+      target.cacheDenialCapacity.value = String(denialCapacity);
+      target.cacheState.textContent = ttl > 0
+        ? successCapacity.toLocaleString() + " success / " + denialCapacity.toLocaleString() + " failure"
+        : "disabled";
+      setFormDisabled(target.cacheForm, !configUpdateAvailable);
+    }
+
     function renderConfig(result) {
       if (!result.ok) {
         target.dnsListen.textContent = "--";
@@ -119,6 +143,7 @@ initAdminPage({
         target.dnssecState.textContent = "unavailable";
         setFormDisabled(target.upstreamForm, true);
         setFormDisabled(target.dnssecForm, true);
+        setFormDisabled(target.cacheForm, true);
         return;
       }
 
@@ -135,6 +160,7 @@ initAdminPage({
       resetUpstreamForm();
       setFormDisabled(target.upstreamForm, !configUpdateAvailable);
       renderDNSSEC(data);
+      renderCache(data);
     }
 
     function renderAPIKeys(result) {
@@ -259,6 +285,41 @@ initAdminPage({
       }
     }
 
+    async function saveCache(event) {
+      event.preventDefault();
+      const ttl = Number(target.cacheTTL.value);
+      const successCapacity = Number(target.cacheSuccessCapacity.value);
+      const denialCapacity = Number(target.cacheDenialCapacity.value);
+      setFormDisabled(target.cacheForm, true);
+      setCacheMessage("Saving DNS cache settings...");
+      try {
+        const result = await fetchJSON("/api/config", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({
+            dns: {
+              cache_ttl: ttl,
+              cache_success_capacity: successCapacity,
+              cache_denial_capacity: denialCapacity
+            }
+          })
+        });
+        renderConfig({ok: true, data: result.config || {}});
+        const status = result.restart_required
+          ? "DNS cache config saved. Process restart required."
+          : "DNS cache config applied through DNS hot reload.";
+        setCacheMessage(status, false);
+        setUpdated(status);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setCacheMessage("DNS cache update failed: " + err.message, true);
+      } finally {
+        setFormDisabled(target.cacheForm, !configUpdateAvailable);
+      }
+    }
+
     async function submitUpstream(event) {
       event.preventDefault();
       const next = currentUpstreams.slice();
@@ -376,6 +437,7 @@ initAdminPage({
     }
 
     on(target.dnssecForm, "submit", saveDNSSEC);
+    on(target.cacheForm, "submit", saveCache);
     on(target.upstreamForm, "submit", submitUpstream);
     on(target.upstreamCancel, "click", () => {
       resetUpstreamForm();

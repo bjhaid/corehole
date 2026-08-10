@@ -357,14 +357,17 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 	}
 
 	return admin.ConfigSnapshot{
-		DNSListen:          cfg.DNS.Listen,
-		AdminListen:        cfg.Admin.Listen,
-		Upstreams:          upstreams,
-		BlockingResponse:   string(cfg.Blocking.Response),
-		BlockingBundled:    cfg.Blocking.Bundled,
-		BlockingPaused:     cfg.Blocking.Paused,
-		BlockingPauseUntil: cfg.Blocking.PauseUntil,
-		Blocklists:         append([]string(nil), cfg.Blocking.Blocklists...),
-		StoragePath:        cfg.Storage.Path,
+		DNSListen:            cfg.DNS.Listen,
+		AdminListen:          cfg.Admin.Listen,
+		Upstreams:            upstreams,
+		CacheTTL:             cfg.DNS.CacheTTL,
+		CacheSuccessCapacity: cfg.DNS.CacheSuccessCapacity,
+		CacheDenialCapacity:  cfg.DNS.CacheDenialCapacity,
+		BlockingResponse:     string(cfg.Blocking.Response),
+		BlockingBundled:      cfg.Blocking.Bundled,
+		BlockingPaused:       cfg.Blocking.Paused,
+		BlockingPauseUntil:   cfg.Blocking.PauseUntil,
+		Blocklists:           append([]string(nil), cfg.Blocking.Blocklists...),
+		StoragePath:          cfg.Storage.Path,
 	}
 }

@@ -16,7 +16,10 @@ func Corefile(cfg config.Config) string {
 	b.WriteString("    metadata\n")
 	b.WriteString("    corehole\n")
 	if cfg.DNS.CacheTTL > 0 {
-		fmt.Fprintf(&b, "    cache %d\n", cfg.DNS.CacheTTL)
+		fmt.Fprintf(&b, "    cache %d {\n", cfg.DNS.CacheTTL)
+		fmt.Fprintf(&b, "        success %d %d\n", cfg.DNS.CacheSuccessCapacity, cfg.DNS.CacheTTL)
+		fmt.Fprintf(&b, "        denial %d %d\n", cfg.DNS.CacheDenialCapacity, cfg.DNS.CacheTTL)
+		b.WriteString("    }\n")
 	}
 	if cfg.DNS.DNSSEC.EffectiveMode() == config.DNSSECModeUpstream {
 		b.WriteString("    corehole_dnssec upstream\n")
