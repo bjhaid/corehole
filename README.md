@@ -30,21 +30,34 @@ with the host distribution.
 
 ## Quick Start
 
-Run corehole with the example configuration:
+Start corehole:
 
 ```sh
-go run ./cmd/corehole serve --config ./corehole.yaml.example
+corehole serve
 ```
 
-With the example config, corehole listens on:
+The built-in defaults are enough for a first run:
 
 - DNS: `:53` for UDP and TCP DNS queries; test locally at `127.0.0.1`
 - Admin console: `http://127.0.0.1:8080`
+- Upstream resolver: Cloudflare at `1.1.1.1:53`
 - SQLite storage: `./corehole.db`
+- Blocking: bundled seed blocklist enabled, blocked responses return `NXDOMAIN`
 
 Binding DNS port 53 usually requires root/admin privileges or a service manager
 capability such as `CAP_NET_BIND_SERVICE`. For unprivileged local development,
-set `dns.listen: ":1053"` in your YAML and use `dig -p 1053`.
+start with a small YAML override that only changes the DNS listener:
+
+```yaml
+dns:
+  listen: ":1053"
+```
+
+Then run:
+
+```sh
+corehole serve --config ./corehole.yaml
+```
 
 Open the admin console in a browser:
 
@@ -62,10 +75,9 @@ On first run for a SQLite database, the console asks you to create the first
 admin password. Admin users and API keys are persisted in the configured
 SQLite database and survive restarts as long as `storage.path` points at the
 same database. Browser sessions are stored in SQLite and survive restarts until
-they expire or are explicitly logged out. After login, the console shows dashboard
-cards, DNS and admin listener details, upstream resolvers, blocking
-configuration and blocklists, audit counts, query logs, analytics, clients and
-groups, local DNS, settings, and API keys.
+they expire or are explicitly logged out. After login, use the web console to
+manage blocklists, upstream resolvers, DNSSEC assistance, local DNS,
+clients/groups, analytics, settings, and API keys.
 
 ## Runtime Dependencies
 
@@ -73,59 +85,24 @@ Corehole is intended to run as a standalone binary. SQLite support is compiled
 into the binary through the Go SQLite driver, so SQLite does not need to be
 installed on the host and no external `sqlite3` command is required for normal
 operation. The `sqlite3` CLI is only useful for optional manual inspection or
-database reset commands shown below.
+manual database maintenance.
 
 ## Configuration
 
-corehole reads YAML configuration from the path passed to `--config`. If the
-file does not exist, built-in defaults are used. See
-[docs/configuration.md](docs/configuration.md) for the full configuration
-reference, including field defaults, validation rules, restart caveats, and
-deployment examples.
+Most configuration should be driven from the web console after `corehole serve`
+has initialized the SQLite database. Use YAML only for bootstrap values that
+must exist before the console is reachable, such as listener addresses or the
+storage path. If the file passed to `--config` does not exist, corehole starts
+with the built-in defaults.
 
 On first startup for a SQLite database, the YAML/default config is saved to
 `app_config` and becomes the active config. On later startups with the same
 database, the persisted `app_config` row is authoritative; YAML changes are not
-applied automatically. Startup logs include `config_source` and
-`active_blocklists` so this is visible.
+applied automatically. Startup logs include `config_source` so this is visible.
 
-Example:
-
-```yaml
-dns:
-  listen: ":53"
-  cache_ttl: 30
-  dnssec:
-    enabled: false
-    mode: off
-  conditional_forwarding:
-    enabled: false
-    domain: ""
-    resolver: ""
-  resolvers:
-    - name: cloudflare
-      address: "1.1.1.1:53"
-      protocol: udp
-      enabled: true
-admin:
-  listen: "127.0.0.1:8080"
-storage:
-  path: "./corehole.db"
-blocking:
-  response: nxdomain
-  bundled: true
-  blocklists: []
-```
-
-At minimum, set one enabled upstream resolver and choose the listeners, DNS
-cache TTL, optional conditional forwarding rule, storage path, blocking response
-mode, bundled blocklist setting, and local blocklist paths for your environment.
-Supported upstream protocols are `udp`/plain DNS, `tcp`, `tls`, and `https`;
-`tcp` resolvers cannot be mixed with non-TCP resolvers in the same upstream
-set. DNSSEC mode defaults to `off`; the only enabled mode is `upstream`, which
-asks trusted validating upstream resolvers for DNSSEC data and AD status. This
-is not local recursive validation like an Unbound-style setup. DHCP settings are
-not implemented.
+See [docs/configuration.md](docs/configuration.md) for the full YAML reference,
+including field defaults, validation rules, restart caveats, and deployment
+examples.
 
 ## Blocklists
 
@@ -141,6 +118,10 @@ console or Admin API are persisted in SQLite and reloaded into the DNS runtime
 immediately. Local paths listed in YAML under `blocking.blocklists` are
 bootstrap blocklists loaded from the active persisted config; use the admin
 console/API for runtime-managed lists.
+
+Blocking can also be paused from the Blocklists page for a fixed duration or
+indefinitely. A pause takes effect immediately and is persisted in SQLite, so it
+survives restarts until the duration expires or blocking is resumed.
 
 Currently supported formats:
 
@@ -176,37 +157,15 @@ dig @127.0.0.1 blocked.example A
 If you changed `dns.listen` to `:1053` for unprivileged development, query that
 listener with `dig @127.0.0.1 -p 1053 blocked.example A`.
 
-To test a custom local blocklist instead, create a local blocklist:
+To test a custom list instead, add a URL or local file path from the Blocklists
+page in the admin console, refresh the list, then query a domain from that list.
+For a quick local-file test, create a file:
 
 ```sh
 printf 'custom-blocked.example\n' > ./blocklist.txt
 ```
 
-Add it to the config:
-
-```yaml
-blocking:
-  response: nxdomain
-  bundled: true
-  blocklists:
-    - ./blocklist.txt
-```
-
-Start corehole:
-
-```sh
-go run ./cmd/corehole serve --config ./corehole.yaml.example
-```
-
-If that database already has a persisted config from before you added the
-blocklist path, either update the persisted config through the admin console or
-Admin API, use a new `storage.path`, or reseed from YAML. The `sqlite3` command
-below is optional and only needed for the manual reseed path:
-
-```sh
-sqlite3 ./corehole.db 'DELETE FROM app_config WHERE id = 1;'
-go run ./cmd/corehole serve --config ./corehole.yaml.example
-```
+Then add `./blocklist.txt` from the Blocklists page and refresh it.
 
 Query the custom blocked domain:
 
@@ -272,6 +231,11 @@ The admin API is served from the same listener as the console.
   apply through DNS hot reload when the DNS listen address is unchanged and the
   updater has a DNS reloader; otherwise the response includes
   `restart_required: true`.
+- `GET /api/blocking/status`: requires authentication and returns whether
+  blocking is active, paused indefinitely, or paused until a timestamp.
+- `PUT /api/blocking/status`: requires authentication and pauses or resumes
+  blocking. Use `{"paused":true,"duration_seconds":300}` for a timed pause,
+  `{"paused":true}` for an indefinite pause, and `{"paused":false}` to resume.
 - `GET /api/queries?limit=100`: requires authentication and returns
   recent DNS audit events. `limit` is optional.
 - `GET /api/analytics/summary`: requires authentication and returns analytics
@@ -299,13 +263,10 @@ accepted.
 
 ## Operational Workflow
 
-1. Create or update a YAML config.
-2. Optionally add local blocklist files and list them under
-   `blocking.blocklists`.
-3. Start corehole with `corehole serve --config ./corehole.yaml`.
-4. Open the admin console and create the first admin password for this database.
-5. Point a client or test command at the configured DNS listener.
-6. Manage blocklists, upstream resolvers, DNSSEC assistance, local DNS, clients,
+1. Start corehole with `corehole serve`.
+2. Open the admin console and create the first admin password for this database.
+3. Point a client or test command at the configured DNS listener.
+4. Manage blocklists, upstream resolvers, DNSSEC assistance, local DNS, clients,
    groups, and API keys from the admin console. Runtime-managed DNS settings and
    blocklists take effect without a restart when the DNS listener address is
    unchanged; listener changes still require a restart.
@@ -315,7 +276,7 @@ accepted.
 ```sh
 go test ./...
 go build ./cmd/corehole
-go run ./cmd/corehole serve --config ./corehole.yaml.example
+go run ./cmd/corehole serve
 ```
 
 ## License

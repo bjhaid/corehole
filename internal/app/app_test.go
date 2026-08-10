@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bjhaid/corehole/internal/blocklist"
 	"github.com/bjhaid/corehole/internal/config"
@@ -209,6 +210,100 @@ func TestDNSRuntimeReloaderInvokesCoreDNSServerReload(t *testing.T) {
 	}
 	if server.last.DNS.Listen != cfg.DNS.Listen {
 		t.Fatalf("reloaded config DNS listen = %q, want %q", server.last.DNS.Listen, cfg.DNS.Listen)
+	}
+}
+
+func TestBlockingRuntimeControllerPausePersistsAndUpdatesRuntime(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "corehole.db")
+	store, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer closeStore(t, ctx, store)
+
+	cfg := testConfig(dbPath)
+	cfgStore := config.NewSQLiteStore(store.DB())
+	if err := cfgStore.Save(ctx, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	runtime := coreplugin.NewRuntime()
+	controller := blockingRuntimeController{store: cfgStore, runtime: runtime}
+	until := time.Now().Add(10 * time.Minute).UTC()
+	status, err := controller.Pause(ctx, until)
+	if err != nil {
+		t.Fatalf("Pause() error = %v", err)
+	}
+	if !status.Paused || status.Indefinite || status.PauseUntil == "" {
+		t.Fatalf("pause status = %#v, want timed pause", status)
+	}
+	if !runtime.BlockingPause().Active(time.Now()) {
+		t.Fatal("runtime blocking pause is not active")
+	}
+
+	reloaded, err := cfgStore.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !reloaded.Blocking.Paused || reloaded.Blocking.PauseUntil == "" {
+		t.Fatalf("persisted blocking config = %#v, want timed pause", reloaded.Blocking)
+	}
+}
+
+func TestBlockingRuntimeControllerResumePersistsAndUpdatesRuntime(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "corehole.db")
+	store, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer closeStore(t, ctx, store)
+
+	cfg := testConfig(dbPath)
+	cfg.Blocking.Paused = true
+	cfg.Blocking.PauseUntil = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	cfgStore := config.NewSQLiteStore(store.DB())
+	if err := cfgStore.Save(ctx, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	runtime := coreplugin.NewRuntime()
+	runtime.PauseBlocking(time.Time{})
+	controller := blockingRuntimeController{store: cfgStore, runtime: runtime}
+	status, err := controller.Resume(ctx)
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if status.Paused {
+		t.Fatalf("resume status = %#v, want unpaused", status)
+	}
+	if runtime.BlockingPause().Enabled {
+		t.Fatal("runtime blocking pause still enabled")
+	}
+
+	reloaded, err := cfgStore.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.Blocking.Paused || reloaded.Blocking.PauseUntil != "" {
+		t.Fatalf("persisted blocking config = %#v, want unpaused", reloaded.Blocking)
+	}
+}
+
+func TestApplyBlockingPauseIgnoresExpiredTimedPause(t *testing.T) {
+	runtime := coreplugin.NewRuntime()
+	cfg := config.BlockingConfig{
+		Paused:     true,
+		PauseUntil: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+	}
+
+	applyBlockingPause(runtime, cfg)
+
+	if runtime.BlockingPause().Enabled {
+		t.Fatal("expired blocking pause still enabled")
 	}
 }
 

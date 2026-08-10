@@ -17,6 +17,23 @@
               </div>
             </div>
 
+            <div class="control-box blocking-pause-box">
+              <span class="control-title">Blocking status</span>
+              <span id="blocking-pause-note" class="control-note">Checking blocking status...</span>
+              <div class="blocking-pause-actions">
+                <label for="blocking-pause-duration" class="sr-only">Pause duration</label>
+                <select id="blocking-pause-duration">
+                  <option value="300">5 minutes</option>
+                  <option value="1800">30 minutes</option>
+                  <option value="3600">1 hour</option>
+                  <option value="86400">24 hours</option>
+                  <option value="indefinite">Indefinitely</option>
+                </select>
+                <button id="blocking-pause-submit" class="secondary" type="button">Pause</button>
+                <button id="blocking-resume" class="secondary" type="button" disabled>Resume</button>
+              </div>
+            </div>
+
             <form id="blocklist-form" class="control-box form-grid">
               <div>
                 <label for="blocklist-source">List URL or file path</label>

@@ -68,6 +68,7 @@ func Serve(ctx context.Context, args []string) error {
 	blocklist.SetBundledDefault(cfg.Blocking.Bundled)
 	runtime := coreplugin.Current()
 	runtime.SetBlockingResponse(cfg.Blocking.Response)
+	applyBlockingPause(runtime, cfg.Blocking)
 	runtime.SetCacheEnabled(cfg.DNS.CacheTTL > 0)
 	filterRepo := filter.NewRepository(store.DB())
 	filterService := filter.NewService(filterRepo)
@@ -121,6 +122,10 @@ func Serve(ctx context.Context, args []string) error {
 			admin.WithSecureCookie(false),
 			admin.WithConfigSnapshot(adminConfigSnapshot(cfg)),
 			admin.WithConfigStoreAndDNSReloader(cfgStore, dnsRuntimeReloader{server: dnsServer}),
+			admin.WithBlockingController(blockingRuntimeController{
+				store:   cfgStore,
+				runtime: runtime,
+			}),
 			admin.WithAuditReader(auditSink),
 			admin.WithLocalDNSStore(localDNSRepo),
 			admin.WithLocalDNSReloader(localDNSReloader),
@@ -198,6 +203,85 @@ func (r runtimeBlocklistReloader) Reload(ctx context.Context) error {
 	return nil
 }
 
+type blockingRuntimeController struct {
+	store   config.Store
+	runtime *coreplugin.Runtime
+}
+
+func (c blockingRuntimeController) Status(now time.Time) admin.BlockingStatus {
+	runtime := c.runtime
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	pause := runtime.BlockingPause()
+	return admin.BlockingStatusFromPause(pause.Enabled, pause.Until, now)
+}
+
+func (c blockingRuntimeController) Pause(ctx context.Context, until time.Time) (admin.BlockingStatus, error) {
+	if c.store == nil {
+		return admin.BlockingStatus{}, fmt.Errorf("blocking pause requires config store")
+	}
+	cfg, err := c.store.Load(ctx)
+	if err != nil {
+		return admin.BlockingStatus{}, err
+	}
+	cfg.Blocking.Paused = true
+	cfg.Blocking.PauseUntil = ""
+	if !until.IsZero() {
+		cfg.Blocking.PauseUntil = until.UTC().Format(time.RFC3339)
+	}
+	if err := c.store.Save(ctx, cfg); err != nil {
+		return admin.BlockingStatus{}, err
+	}
+	runtime := c.runtime
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	runtime.PauseBlocking(until)
+	return c.Status(time.Now()), nil
+}
+
+func (c blockingRuntimeController) Resume(ctx context.Context) (admin.BlockingStatus, error) {
+	if c.store == nil {
+		return admin.BlockingStatus{}, fmt.Errorf("blocking resume requires config store")
+	}
+	cfg, err := c.store.Load(ctx)
+	if err != nil {
+		return admin.BlockingStatus{}, err
+	}
+	cfg.Blocking.Paused = false
+	cfg.Blocking.PauseUntil = ""
+	if err := c.store.Save(ctx, cfg); err != nil {
+		return admin.BlockingStatus{}, err
+	}
+	runtime := c.runtime
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	runtime.ResumeBlocking()
+	return c.Status(time.Now()), nil
+}
+
+func applyBlockingPause(runtime *coreplugin.Runtime, cfg config.BlockingConfig) {
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	if !cfg.Paused {
+		runtime.ResumeBlocking()
+		return
+	}
+	if cfg.PauseUntil == "" {
+		runtime.PauseBlocking(time.Time{})
+		return
+	}
+	until, err := time.Parse(time.RFC3339Nano, cfg.PauseUntil)
+	if err != nil || !until.After(time.Now()) {
+		runtime.ResumeBlocking()
+		return
+	}
+	runtime.PauseBlocking(until)
+}
+
 type localDNSEnabledStore interface {
 	ListEnabled(context.Context) ([]localdns.Record, error)
 }
@@ -273,11 +357,14 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 	}
 
 	return admin.ConfigSnapshot{
-		DNSListen:        cfg.DNS.Listen,
-		AdminListen:      cfg.Admin.Listen,
-		Upstreams:        upstreams,
-		BlockingResponse: string(cfg.Blocking.Response),
-		Blocklists:       append([]string(nil), cfg.Blocking.Blocklists...),
-		StoragePath:      cfg.Storage.Path,
+		DNSListen:          cfg.DNS.Listen,
+		AdminListen:        cfg.Admin.Listen,
+		Upstreams:          upstreams,
+		BlockingResponse:   string(cfg.Blocking.Response),
+		BlockingBundled:    cfg.Blocking.Bundled,
+		BlockingPaused:     cfg.Blocking.Paused,
+		BlockingPauseUntil: cfg.Blocking.PauseUntil,
+		Blocklists:         append([]string(nil), cfg.Blocking.Blocklists...),
+		StoragePath:        cfg.Storage.Path,
 	}
 }

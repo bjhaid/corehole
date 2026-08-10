@@ -191,6 +191,7 @@ type Runtime struct {
 	audit         atomic.Value
 	mode          atomic.Value
 	localResolver atomic.Value
+	blockingPause atomic.Value
 	cacheEnabled  atomic.Bool
 }
 
@@ -200,6 +201,7 @@ func NewRuntime() *Runtime {
 	rt.SetAudit(coreholeaudit.NoopSink{})
 	rt.SetBlockingResponse(coreholedns.BlockingResponseNXDOMAIN)
 	rt.SetLocalResolver(nil)
+	rt.ResumeBlocking()
 	rt.SetCacheEnabled(false)
 	return rt
 }
@@ -212,6 +214,9 @@ func (r *Runtime) SetDecider(decider coreholedns.Decider) {
 }
 
 func (r *Runtime) Decide(ctx context.Context, q coreholedns.Query) coreholedns.Decision {
+	if pause := r.BlockingPause(); pause.Active(q.Timestamp) {
+		return coreholedns.Decision{Action: coreholedns.ActionAllow, Reason: pause.Reason()}
+	}
 	return r.decider.Load().(deciderHolder).decider.Decide(ctx, q)
 }
 
@@ -255,6 +260,55 @@ func (r *Runtime) SetCacheEnabled(enabled bool) {
 
 func (r *Runtime) CacheEnabled() bool {
 	return r.cacheEnabled.Load()
+}
+
+type BlockingPause struct {
+	Enabled bool
+	Until   time.Time
+}
+
+func (p BlockingPause) Active(now time.Time) bool {
+	if !p.Enabled {
+		return false
+	}
+	if p.Until.IsZero() {
+		return true
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return p.Until.After(now)
+}
+
+func (p BlockingPause) Indefinite() bool {
+	return p.Enabled && p.Until.IsZero()
+}
+
+func (p BlockingPause) Reason() string {
+	if p.Indefinite() {
+		return "blocking paused indefinitely"
+	}
+	return "blocking paused"
+}
+
+func (r *Runtime) PauseBlocking(until time.Time) {
+	r.blockingPause.Store(BlockingPause{Enabled: true, Until: until.UTC()})
+}
+
+func (r *Runtime) ResumeBlocking() {
+	r.blockingPause.Store(BlockingPause{})
+}
+
+func (r *Runtime) BlockingPause() BlockingPause {
+	pause, ok := r.blockingPause.Load().(BlockingPause)
+	if !ok {
+		return BlockingPause{}
+	}
+	if pause.Enabled && !pause.Until.IsZero() && !pause.Until.After(time.Now()) {
+		r.ResumeBlocking()
+		return BlockingPause{}
+	}
+	return pause
 }
 
 type AllowAll struct{}

@@ -177,7 +177,7 @@ func TestLogoutRequiresAndInvalidatesSession(t *testing.T) {
 func TestProtectedAPIRequiresSession(t *testing.T) {
 	server := newTestServer()
 
-	for _, path := range []string{"/api/dashboard", "/api/queries", "/api/config", "/api/api-keys"} {
+	for _, path := range []string{"/api/dashboard", "/api/queries", "/api/config", "/api/blocking/status", "/api/api-keys"} {
 		res := get(t, server, path, nil)
 		if res.Code != http.StatusUnauthorized {
 			t.Fatalf("%s status code = %d, want %d", path, res.Code, http.StatusUnauthorized)
@@ -797,6 +797,111 @@ func TestConfigPayload(t *testing.T) {
 	}
 }
 
+func TestBlockingStatusAPI(t *testing.T) {
+	controller := &fakeBlockingController{
+		status: BlockingStatus{
+			Paused:           true,
+			Indefinite:       true,
+			RemainingSeconds: 0,
+		},
+	}
+	server := newTestServer(WithBlockingController(controller))
+	cookie := setupSession(t, server)
+
+	res := get(t, server, "/api/blocking/status", cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+	body := decodeResponse[BlockingStatus](t, res)
+	if !body.Paused || !body.Indefinite {
+		t.Fatalf("blocking status = %#v, want indefinite pause", body)
+	}
+	if controller.statusCalls != 1 {
+		t.Fatalf("statusCalls = %d, want 1", controller.statusCalls)
+	}
+}
+
+func TestBlockingStatusAPIPauseForDuration(t *testing.T) {
+	controller := &fakeBlockingController{}
+	server := newTestServer(WithBlockingController(controller))
+	cookie := setupSession(t, server)
+
+	started := time.Now()
+	res := putJSON(t, server, "/api/blocking/status", map[string]any{
+		"paused":           true,
+		"duration_seconds": 300,
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+	if controller.pauseCount != 1 {
+		t.Fatalf("pauseCount = %d, want 1", controller.pauseCount)
+	}
+	if controller.until.Before(started.Add(295*time.Second)) || controller.until.After(started.Add(305*time.Second)) {
+		t.Fatalf("pause until = %s, want about 5 minutes from now", controller.until)
+	}
+	body := decodeResponse[BlockingStatus](t, res)
+	if !body.Paused || body.Indefinite {
+		t.Fatalf("blocking status = %#v, want timed pause", body)
+	}
+}
+
+func TestBlockingStatusAPIPauseIndefinitely(t *testing.T) {
+	controller := &fakeBlockingController{}
+	server := newTestServer(WithBlockingController(controller))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/blocking/status", map[string]any{
+		"paused": true,
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+	if controller.pauseCount != 1 {
+		t.Fatalf("pauseCount = %d, want 1", controller.pauseCount)
+	}
+	if !controller.until.IsZero() {
+		t.Fatalf("pause until = %s, want zero time for indefinite", controller.until)
+	}
+	body := decodeResponse[BlockingStatus](t, res)
+	if !body.Paused || !body.Indefinite {
+		t.Fatalf("blocking status = %#v, want indefinite pause", body)
+	}
+}
+
+func TestBlockingStatusAPIResume(t *testing.T) {
+	controller := &fakeBlockingController{status: BlockingStatus{Paused: true, Indefinite: true}}
+	server := newTestServer(WithBlockingController(controller))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/blocking/status", map[string]any{
+		"paused": false,
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+	if controller.resumeCount != 1 {
+		t.Fatalf("resumeCount = %d, want 1", controller.resumeCount)
+	}
+	body := decodeResponse[BlockingStatus](t, res)
+	if body.Paused {
+		t.Fatalf("blocking status = %#v, want resumed", body)
+	}
+}
+
+func TestBlockingStatusAPIRejectsInvalidDuration(t *testing.T) {
+	server := newTestServer(WithBlockingController(&fakeBlockingController{}))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/blocking/status", map[string]any{
+		"paused":           true,
+		"duration_seconds": 0,
+	}, cookie)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusBadRequest, res.Body.String())
+	}
+}
+
 func TestConfigUpdateRejectsInvalidConfig(t *testing.T) {
 	store := &fakeConfigStore{cfg: config.Default()}
 	server := newTestServer(WithConfigStore(store))
@@ -1335,4 +1440,30 @@ func (r *fakeDNSReloader) ReloadDNS(_ context.Context, cfg config.Config) error 
 	r.reloadCount++
 	r.last = cfg
 	return nil
+}
+
+type fakeBlockingController struct {
+	status      BlockingStatus
+	statusCalls int
+	pauseCount  int
+	resumeCount int
+	until       time.Time
+}
+
+func (c *fakeBlockingController) Status(time.Time) BlockingStatus {
+	c.statusCalls++
+	return c.status
+}
+
+func (c *fakeBlockingController) Pause(_ context.Context, until time.Time) (BlockingStatus, error) {
+	c.pauseCount++
+	c.until = until
+	c.status = BlockingStatusFromPause(true, until, time.Now())
+	return c.status, nil
+}
+
+func (c *fakeBlockingController) Resume(context.Context) (BlockingStatus, error) {
+	c.resumeCount++
+	c.status = BlockingStatus{}
+	return c.status, nil
 }

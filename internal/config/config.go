@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bjhaid/corehole/internal/blocklist"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
@@ -64,6 +65,8 @@ type StorageConfig struct {
 type BlockingConfig struct {
 	Response   coreholedns.BlockingResponse `yaml:"response" json:"response"`
 	Bundled    bool                         `yaml:"bundled" json:"bundled"`
+	Paused     bool                         `yaml:"paused" json:"paused"`
+	PauseUntil string                       `yaml:"pause_until,omitempty" json:"pause_until,omitempty"`
 	Blocklists []string                     `yaml:"blocklists" json:"blocklists"`
 }
 
@@ -196,6 +199,13 @@ func (c Config) Validate() error {
 	case coreholedns.BlockingResponseNXDOMAIN, coreholedns.BlockingResponseNullIP, coreholedns.BlockingResponseRefused:
 	default:
 		return errors.New("blocking.response must be nxdomain, null-ip, or refused")
+	}
+	if c.Blocking.PauseUntil != "" {
+		if _, err := time.Parse(time.RFC3339Nano, c.Blocking.PauseUntil); err != nil {
+			if _, err := time.Parse(time.RFC3339, c.Blocking.PauseUntil); err != nil {
+				return errors.New("blocking.pause_until must be an RFC3339 timestamp")
+			}
+		}
 	}
 	return nil
 }

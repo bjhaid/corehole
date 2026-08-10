@@ -15,6 +15,10 @@ function pageFields() {
     enabled: required("#blocklist-enabled"),
     bundledToggle: required("#bundled-toggle"),
     bundledNote: required("#bundled-note"),
+    pauseNote: required("#blocking-pause-note"),
+    pauseDuration: required("#blocking-pause-duration"),
+    pauseSubmit: required("#blocking-pause-submit"),
+    pauseResume: required("#blocking-resume"),
     sourceStatus: required("#blocklist-source-status"),
     body: required("#blocklist-body")
   };
@@ -66,6 +70,28 @@ initAdminPage({
       fields.bundledNote.textContent = "Bundled default state is not exposed by the config API.";
       fields.bundledToggle.disabled = true;
       fields.bundledToggle.textContent = "Unavailable";
+    }
+
+    function renderBlockingPause(result) {
+      if (!result.ok) {
+        fields.pauseNote.textContent = "Blocking pause controls are unavailable.";
+        fields.pauseSubmit.disabled = true;
+        fields.pauseResume.disabled = true;
+        return;
+      }
+      const status = result.data || {};
+      const paused = Boolean(pick(status, ["paused"]));
+      fields.pauseSubmit.disabled = false;
+      fields.pauseResume.disabled = !paused;
+      if (!paused) {
+        fields.pauseNote.textContent = "Blocking is active.";
+        return;
+      }
+      if (pick(status, ["indefinite"])) {
+        fields.pauseNote.textContent = "Blocking is paused indefinitely.";
+        return;
+      }
+      fields.pauseNote.textContent = "Blocking is paused until " + formatTime(pick(status, ["pause_until", "pauseUntil"])) + ".";
     }
 
     function renderBlocklists(config, filterResult) {
@@ -153,10 +179,11 @@ initAdminPage({
     }
 
     async function refreshPage() {
-      const [config, filterLists, groups] = await Promise.all([
+      const [config, filterLists, groups, blockingStatus] = await Promise.all([
         fetchOptionalJSON("/api/config"),
         fetchOptionalJSON("/api/filter/lists"),
-        fetchOptionalJSON("/api/filter/groups")
+        fetchOptionalJSON("/api/filter/groups"),
+        fetchOptionalJSON("/api/blocking/status")
       ]);
       if (config.ok) {
         currentConfig = config.data || {};
@@ -165,8 +192,48 @@ initAdminPage({
       groupsAvailable = groups.ok;
       const filterListItems = filterLists.ok ? normalizeFilterLists(filterLists.data) : [];
       currentAssignments = filterLists.ok ? await loadGroupAssignments("lists", filterListItems) : new Map();
+      renderBlockingPause(blockingStatus);
       renderBlocklists(config.ok ? config.data || {} : currentConfig, filterLists);
       setUpdatedStatus("Blocklists");
+    }
+
+    async function pauseBlocking() {
+      const duration = fields.pauseDuration.value;
+      const payload = {paused: true};
+      if (duration !== "indefinite") {
+        payload.duration_seconds = Number(duration);
+      }
+      fields.pauseSubmit.disabled = true;
+      try {
+        const status = await fetchJSON("/api/blocking/status", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        renderBlockingPause({ok: true, data: status});
+        await refresh();
+        setUpdated("Blocking pause updated.");
+      } catch (err) {
+        setUpdated("Blocking pause failed: " + err.message);
+        fields.pauseSubmit.disabled = false;
+      }
+    }
+
+    async function resumeBlocking() {
+      fields.pauseResume.disabled = true;
+      try {
+        const status = await fetchJSON("/api/blocking/status", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({paused: false})
+        });
+        renderBlockingPause({ok: true, data: status});
+        await refresh();
+        setUpdated("Blocking resumed.");
+      } catch (err) {
+        setUpdated("Blocking resume failed: " + err.message);
+        fields.pauseResume.disabled = false;
+      }
     }
 
     async function toggleBundledBlocking() {
@@ -317,6 +384,8 @@ initAdminPage({
     }
 
     on(fields.bundledToggle, "click", toggleBundledBlocking);
+    on(fields.pauseSubmit, "click", pauseBlocking);
+    on(fields.pauseResume, "click", resumeBlocking);
     on(fields.form, "submit", createBlocklist);
     on(fields.body, "click", handleBlocklistAction);
 

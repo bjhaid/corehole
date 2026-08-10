@@ -19,6 +19,7 @@ type Server struct {
 	secureCookie   bool
 	auditReader    AuditReader
 	configSource   ConfigSource
+	blocking       BlockingController
 	localDNS       LocalDNSStore
 	localDNSReload LocalDNSReloader
 	filterService  FilterService
@@ -117,6 +118,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/analytics/settings", s.requireSession(s.handleAnalyticsSettings))
 	s.mux.HandleFunc("/api/analytics/cleanup", s.requireSession(s.handleAnalyticsCleanup))
 	s.mux.HandleFunc("/api/config", s.requireSession(s.handleConfig))
+	s.mux.HandleFunc("/api/blocking/status", s.requireSession(s.handleBlockingStatus))
 	s.mux.HandleFunc("/api/localdns/records", s.requireSession(s.handleLocalDNSRecords))
 	s.mux.HandleFunc("/api/localdns/records/", s.requireSession(s.handleLocalDNSRecord))
 	s.mux.HandleFunc("/api/filter/lists", s.requireSession(s.handleFilterLists))

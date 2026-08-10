@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	coreholeaudit "github.com/bjhaid/corehole/internal/audit"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
@@ -76,6 +77,40 @@ func TestHandlerAuditsForwardDiagnosticsFromMetadata(t *testing.T) {
 		sink.event.RetryCount != -1 ||
 		sink.event.ForwardError != "" {
 		t.Fatalf("audit event diagnostics = %#v", sink.event)
+	}
+}
+
+func TestRuntimePauseBlockingAllowsBlockedDomain(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetDecider(blockAdzerk{})
+	runtime.PauseBlocking(time.Time{})
+
+	decision := runtime.Decide(context.Background(), coreholedns.Query{
+		Name:      "adzerk.com.",
+		Timestamp: time.Now(),
+	})
+	if decision.Action != coreholedns.ActionAllow {
+		t.Fatalf("decision action = %s, want allow", decision.Action)
+	}
+	if decision.Reason != "blocking paused indefinitely" {
+		t.Fatalf("decision reason = %q, want blocking paused indefinitely", decision.Reason)
+	}
+}
+
+func TestRuntimeExpiredPauseFallsBackToDecider(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetDecider(blockAdzerk{})
+	runtime.PauseBlocking(time.Now().Add(-time.Second))
+
+	decision := runtime.Decide(context.Background(), coreholedns.Query{
+		Name:      "adzerk.com.",
+		Timestamp: time.Now(),
+	})
+	if decision.Action != coreholedns.ActionBlock {
+		t.Fatalf("decision action = %s, want block", decision.Action)
+	}
+	if runtime.BlockingPause().Enabled {
+		t.Fatal("expired pause still enabled")
 	}
 }
 

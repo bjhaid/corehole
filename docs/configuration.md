@@ -37,6 +37,8 @@ config source and active blocklist count.
 | `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | SQLite database path. The parent directory is created if needed. The database stores audit events, all-time audit action counters, admin users, and persisted app config. |
 | `blocking.response` | string | `"nxdomain"` | `"nxdomain"`, `"null-ip"`, or `"refused"` | DNS response mode for blocked queries. `nxdomain` returns NXDOMAIN. `null-ip` returns `0.0.0.0` for A queries and `::` for AAAA queries, and NXDOMAIN for other query types. `refused` returns REFUSED. |
 | `blocking.bundled` | boolean | `true` | `true` or `false` | Enables or disables the embedded seed blocklist from `internal/blocklist/seed.txt`. When enabled, bundled entries are combined with entries loaded from `blocking.blocklists`. |
+| `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
+| `blocking.pause_until` | string | `""` | Empty or RFC3339 timestamp | Optional end time for a timed pause. Empty with `blocking.paused: true` means pause indefinitely. Expired timestamps are ignored by the DNS runtime. |
 | `blocking.blocklists` | list of strings | empty list | Local file paths | Files to open and parse at startup. Entries from these files decide which queries are blocked in addition to any bundled entries. Missing or unreadable files fail startup. |
 
 Unknown YAML fields are not rejected by the current loader. Treat a typo as
@@ -72,6 +74,9 @@ Fields read at startup by the running application:
   restart required after YAML changes.
 - `blocking.response`: copied into the DNS plugin runtime at startup; restart
   required after YAML changes.
+- `blocking.paused` and `blocking.pause_until`: copied into the DNS plugin
+  runtime at startup. Use the admin console to pause or resume blocking in the
+  running process.
 - `blocking.bundled`: copied into the blocklist package's bundled-default
   setting during config load; restart required after YAML changes.
 - `blocking.blocklists`: files are opened and parsed at startup; restart
@@ -129,6 +134,7 @@ Startup validation fails when:
 - a CoreDNS-generated token field contains whitespace or braces.
 - `blocking.response` is empty.
 - `blocking.response` is not `nxdomain`, `null-ip`, or `refused`.
+- `blocking.pause_until` is non-empty and not an RFC3339 timestamp.
 
 Additional runtime errors can still happen after config validation:
 

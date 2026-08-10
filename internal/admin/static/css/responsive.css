@@ -67,6 +67,9 @@
         align-items: stretch;
         flex-direction: column;
       }
+      .blocking-pause-actions {
+        grid-template-columns: 1fr;
+      }
       .query-pagination {
         align-items: stretch;
         flex-direction: column;

@@ -58,6 +58,12 @@ type DNSReloader interface {
 	ReloadDNS(ctx context.Context, cfg config.Config) error
 }
 
+type BlockingController interface {
+	Status(time.Time) BlockingStatus
+	Pause(ctx context.Context, until time.Time) (BlockingStatus, error)
+	Resume(ctx context.Context) (BlockingStatus, error)
+}
+
 type ConfigSourceFunc func(context.Context) (ConfigSnapshot, error)
 
 func (f ConfigSourceFunc) Snapshot(ctx context.Context) (ConfigSnapshot, error) {
@@ -100,6 +106,14 @@ func WithConfigStoreAndDNSReloader(store config.Store, reloader DNSReloader) Opt
 	}
 }
 
+func WithBlockingController(controller BlockingController) Option {
+	return func(s *Server) {
+		if controller != nil {
+			s.blocking = controller
+		}
+	}
+}
+
 type ConfigSnapshot struct {
 	DNSListen             string
 	AdminListen           string
@@ -109,6 +123,8 @@ type ConfigSnapshot struct {
 	ConditionalForwarding ConditionalForwardingSnapshot
 	BlockingResponse      string
 	BlockingBundled       bool
+	BlockingPaused        bool
+	BlockingPauseUntil    string
 	Blocklists            []string
 	StoragePath           string
 }
@@ -201,6 +217,8 @@ type dashboardResponse struct {
 	AdminListen          string             `json:"admin_listen"`
 	BlockingResponse     string             `json:"blocking_response"`
 	BlockingBundled      bool               `json:"blocking_bundled"`
+	BlockingPaused       bool               `json:"blocking_paused"`
+	BlockingPauseUntil   string             `json:"blocking_pause_until,omitempty"`
 }
 
 type queriesResponse struct {
@@ -245,6 +263,8 @@ type configResponse struct {
 	ConditionalForwarding ConditionalForwardingSnapshot `json:"conditional_forwarding"`
 	BlockingResponse      string                        `json:"blocking_response"`
 	BlockingBundled       bool                          `json:"blocking_bundled"`
+	BlockingPaused        bool                          `json:"blocking_paused"`
+	BlockingPauseUntil    string                        `json:"blocking_pause_until,omitempty"`
 	Blocklists            []string                      `json:"blocklists"`
 	BlocklistPaths        []string                      `json:"blocklist_paths"`
 	BlocklistCount        int                           `json:"blocklist_count"`
@@ -254,6 +274,19 @@ type configResponse struct {
 type configUpdateResponse struct {
 	Config          configResponse `json:"config"`
 	RestartRequired bool           `json:"restart_required"`
+}
+
+type BlockingStatus struct {
+	Paused           bool   `json:"paused"`
+	Indefinite       bool   `json:"indefinite"`
+	PauseUntil       string `json:"pause_until,omitempty"`
+	RemainingSeconds int64  `json:"remaining_seconds"`
+}
+
+type blockingStatusRequest struct {
+	Paused          *bool   `json:"paused"`
+	DurationSeconds *int64  `json:"duration_seconds,omitempty"`
+	PauseUntil      *string `json:"pause_until,omitempty"`
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +332,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		AdminListen:        snapshot.AdminListen,
 		BlockingResponse:   snapshot.BlockingResponse,
 		BlockingBundled:    snapshot.BlockingBundled,
+		BlockingPaused:     snapshot.BlockingPaused,
+		BlockingPauseUntil: snapshot.BlockingPauseUntil,
 	}
 	for _, event := range events {
 		switch string(event.Action) {
@@ -367,6 +402,97 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		s.handlePutConfig(w, r)
 	default:
 		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleBlockingStatus(w http.ResponseWriter, r *http.Request) {
+	if s.blocking == nil {
+		writeError(w, http.StatusServiceUnavailable, "blocking_control_unavailable")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.blocking.Status(time.Now()))
+	case http.MethodPut:
+		var req blockingStatusRequest
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if req.Paused == nil {
+			writeError(w, http.StatusBadRequest, "paused_required")
+			return
+		}
+		if !*req.Paused {
+			status, err := s.blocking.Resume(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "blocking_resume_failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+			return
+		}
+
+		until, ok := parseBlockingPauseUntil(req)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid_pause_duration")
+			return
+		}
+		status, err := s.blocking.Pause(r.Context(), until)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "blocking_pause_failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, status)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func parseBlockingPauseUntil(req blockingStatusRequest) (time.Time, bool) {
+	if req.DurationSeconds != nil && req.PauseUntil != nil && strings.TrimSpace(*req.PauseUntil) != "" {
+		return time.Time{}, false
+	}
+	if req.DurationSeconds != nil {
+		if *req.DurationSeconds <= 0 {
+			return time.Time{}, false
+		}
+		return time.Now().Add(time.Duration(*req.DurationSeconds) * time.Second).UTC(), true
+	}
+	if req.PauseUntil != nil {
+		raw := strings.TrimSpace(*req.PauseUntil)
+		if raw == "" {
+			return time.Time{}, true
+		}
+		until, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return time.Time{}, false
+		}
+		if !until.After(time.Now()) {
+			return time.Time{}, false
+		}
+		return until.UTC(), true
+	}
+	return time.Time{}, true
+}
+
+func BlockingStatusFromPause(paused bool, until time.Time, now time.Time) BlockingStatus {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if !paused {
+		return BlockingStatus{}
+	}
+	if until.IsZero() {
+		return BlockingStatus{Paused: true, Indefinite: true}
+	}
+	if !until.After(now) {
+		return BlockingStatus{}
+	}
+	return BlockingStatus{
+		Paused:           true,
+		PauseUntil:       until.UTC().Format(time.RFC3339),
+		RemainingSeconds: int64(until.Sub(now).Seconds()),
 	}
 }
 
@@ -518,6 +644,8 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 		ConditionalForwarding: snapshot.ConditionalForwarding,
 		BlockingResponse:      snapshot.BlockingResponse,
 		BlockingBundled:       snapshot.BlockingBundled,
+		BlockingPaused:        snapshot.BlockingPaused,
+		BlockingPauseUntil:    snapshot.BlockingPauseUntil,
 		Blocklists:            blocklists,
 		BlocklistPaths:        blocklists,
 		BlocklistCount:        len(blocklists),
@@ -701,10 +829,12 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 			Protocol:      cfg.DNS.ConditionalForwarding.Protocol,
 			TLSServerName: cfg.DNS.ConditionalForwarding.TLSServerName,
 		},
-		BlockingResponse: string(cfg.Blocking.Response),
-		BlockingBundled:  cfg.Blocking.Bundled,
-		Blocklists:       cloneStrings(cfg.Blocking.Blocklists),
-		StoragePath:      cfg.Storage.Path,
+		BlockingResponse:   string(cfg.Blocking.Response),
+		BlockingBundled:    cfg.Blocking.Bundled,
+		BlockingPaused:     cfg.Blocking.Paused,
+		BlockingPauseUntil: cfg.Blocking.PauseUntil,
+		Blocklists:         cloneStrings(cfg.Blocking.Blocklists),
+		StoragePath:        cfg.Storage.Path,
 	}
 }
 

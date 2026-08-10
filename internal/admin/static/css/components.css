@@ -19,7 +19,7 @@
     }
     .blocklist-controls {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 1.5fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 12px;
     }
@@ -53,6 +53,32 @@
       grid-template-columns: minmax(180px, 1fr) 110px 100px auto auto;
       gap: 10px;
       align-items: end;
+    }
+    .blocklist-controls .form-grid {
+      grid-column: 1 / -1;
+    }
+    .blocking-pause-box {
+      display: grid;
+      gap: 10px;
+    }
+    .blocking-pause-actions {
+      display: grid;
+      grid-template-columns: minmax(140px, 1fr) auto auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .blocking-pause-actions button {
+      white-space: nowrap;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
     .rule-form-grid {
       display: grid;
