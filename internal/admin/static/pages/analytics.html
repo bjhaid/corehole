@@ -1,0 +1,177 @@
+{{define "page.analytics"}}
+        <section id="panel-analytics" class="page-panel" data-page="analytics">
+          <section class="panel analytics-panel">
+            <div class="panel-header">
+              <h3>Analytics / Privacy</h3>
+              <span id="analytics-status">Loading analytics...</span>
+            </div>
+
+            <form id="analytics-settings-form" class="control-box analytics-settings">
+              <div>
+                <label for="privacy-level">Privacy level</label>
+                <select id="privacy-level" name="privacy_level">
+                  <option value="0">Level 0: show clients and domains</option>
+                  <option value="1">Level 1: hide client IPs, keep domains</option>
+                  <option value="2">Level 2: hide client IPs and domains</option>
+                </select>
+                <span id="privacy-note" class="control-note">Checking privacy settings...</span>
+              </div>
+              <div class="retention-field">
+                <label for="retention-value">Retention</label>
+                <div class="retention-duration-control">
+                  <input id="retention-value" name="retention_value" type="number" min="0" step="1" inputmode="numeric">
+                  <select id="retention-unit" name="retention_unit" aria-label="Retention unit">
+                    <option value="seconds">Seconds</option>
+                    <option value="minutes">Minutes</option>
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                  </select>
+                </div>
+                <span id="retention-note" class="control-note">0 disables automatic retention cleanup.</span>
+              </div>
+              <div class="analytics-settings-actions">
+                <button id="analytics-save" type="submit" disabled>Save settings</button>
+                <button id="analytics-cleanup" class="secondary" type="button" disabled>Run cleanup</button>
+              </div>
+            </form>
+            <div id="analytics-message" class="analytics-message" role="status" aria-live="polite"></div>
+
+            <div class="analytics-grid">
+              <div class="analytics-chart-panel">
+                <div class="panel-header">
+                  <h3>Query activity</h3>
+                  <span id="analytics-bucket-count"></span>
+                </div>
+                <div id="analytics-buckets-chart" class="bucket-chart" role="group" aria-label="Query activity over time">
+                  <p id="analytics-buckets-title" class="bucket-chart-title">DNS queries by time</p>
+                  <p class="bucket-chart-note">Allowed and blocked queries per time bucket.</p>
+                  <div class="bucket-legend" aria-hidden="true">
+                    <span class="bucket-legend-item"><span class="bucket-swatch allowed"></span>Allowed</span>
+                    <span class="bucket-legend-item"><span class="bucket-swatch blocked"></span>Blocked</span>
+                  </div>
+                  <div id="analytics-buckets-chart-body" class="bucket-empty">Loading query activity...</div>
+                  <div id="analytics-buckets-tooltip" class="bucket-tooltip hidden" role="tooltip"></div>
+                </div>
+              </div>
+
+              <div class="analytics-client-activity">
+                <div class="panel-header">
+                  <h3>Client activity over time</h3>
+                  <span id="analytics-client-activity-count"></span>
+                </div>
+                <div id="analytics-client-activity-chart" class="bucket-chart client-activity-chart" role="group" aria-label="Client activity over time">
+                  <p id="analytics-client-activity-title" class="bucket-chart-title">Client query volume over time</p>
+                  <p class="bucket-chart-note">Bar height shows total queries per time bucket. Color segments show the busiest clients.</p>
+                  <div id="analytics-client-activity-legend" class="client-activity-legend" aria-hidden="true"></div>
+                  <div id="analytics-client-activity-body" class="bucket-empty">Loading client activity...</div>
+                  <div id="analytics-client-activity-tooltip" class="bucket-tooltip hidden" role="tooltip"></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="panel-header">
+                  <h3>Top clients (total)</h3>
+                  <span id="analytics-client-count"></span>
+                </div>
+                <div class="table-wrap analytics-table-wrap">
+                  <table class="analytics-table analytics-frequency-table">
+                    <colgroup>
+                      <col>
+                      <col class="analytics-count-col">
+                      <col class="analytics-frequency-col">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Client</th>
+                        <th>Requests</th>
+                        <th>Frequency</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-clients-body">
+                      <tr><td colspan="3" class="loading">Loading clients...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div class="panel-header">
+                  <h3>Top blocked clients</h3>
+                  <span id="analytics-blocked-client-count"></span>
+                </div>
+                <div class="table-wrap analytics-table-wrap">
+                  <table class="analytics-table analytics-frequency-table">
+                    <colgroup>
+                      <col>
+                      <col class="analytics-count-col">
+                      <col class="analytics-frequency-col">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Client</th>
+                        <th>Blocked</th>
+                        <th>Frequency</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-blocked-clients-body">
+                      <tr><td colspan="3" class="loading">Loading blocked clients...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div class="panel-header">
+                  <h3>Top queried domains (total)</h3>
+                  <span id="analytics-queried-count"></span>
+                </div>
+                <div class="table-wrap analytics-table-wrap">
+                  <table class="analytics-table analytics-frequency-table">
+                    <colgroup>
+                      <col>
+                      <col class="analytics-count-col">
+                      <col class="analytics-frequency-col">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Domain</th>
+                        <th>Hits</th>
+                        <th>Frequency</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-queried-body">
+                      <tr><td colspan="3" class="loading">Loading queried domains...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div class="panel-header">
+                  <h3>Top blocked domains</h3>
+                  <span id="analytics-blocked-count"></span>
+                </div>
+                <div class="table-wrap analytics-table-wrap">
+                  <table class="analytics-table analytics-frequency-table">
+                    <colgroup>
+                      <col>
+                      <col class="analytics-count-col">
+                      <col class="analytics-frequency-col">
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Domain</th>
+                        <th>Hits</th>
+                        <th>Frequency</th>
+                      </tr>
+                    </thead>
+                    <tbody id="analytics-blocked-body">
+                      <tr><td colspan="3" class="loading">Loading blocked domains...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+{{end}}

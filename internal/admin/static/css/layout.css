@@ -1,0 +1,291 @@
+    .page {
+      min-height: 100vh;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(10px);
+    }
+    .topbar-inner {
+      width: min(1180px, calc(100vw - 32px));
+      min-height: 58px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: block;
+      background: #0d1117;
+      object-fit: contain;
+      box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.18);
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 2px 0 0;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .session-state {
+      color: var(--text-muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 16px 0 28px;
+    }
+    main.admin-main {
+      width: min(1500px, calc(100vw - 32px));
+    }
+    .hidden {
+      display: none !important;
+    }
+    .auth-grid {
+      min-height: calc(100vh - 112px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+      align-items: start;
+      padding-top: 34px;
+    }
+    .auth-summary,
+    .auth-card,
+    .card,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow);
+    }
+    .auth-summary {
+      padding: 20px;
+    }
+    .auth-summary h2,
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .auth-summary p,
+    .panel p {
+      margin: 0;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .auth-facts {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .fact {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .fact strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+    .fact span {
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .auth-card {
+      padding: 18px;
+    }
+    .auth-card h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    .auth-card p {
+      margin: 0;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .auth-card form {
+      margin-top: 16px;
+    }
+    .auth-card button {
+      width: 100%;
+      margin-top: 12px;
+    }
+    .status-line {
+      min-height: 20px;
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .status-line.error {
+      color: var(--red);
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .toolbar h2 {
+      margin: 0;
+      font-size: 17px;
+    }
+    .toolbar p {
+      margin: 2px 0 0;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .admin-layout {
+      display: grid;
+      grid-template-columns: 208px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .side-nav {
+      position: sticky;
+      top: 74px;
+      z-index: 2;
+      display: grid;
+      gap: 2px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow);
+    }
+    .side-nav-title {
+      padding: 4px 8px 8px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .nav-link {
+      position: relative;
+      display: block;
+      min-height: 38px;
+      padding: 9px 10px 9px 12px;
+      border-radius: 6px;
+      color: #243242;
+      font-size: 14px;
+      font-weight: 750;
+      line-height: 1.35;
+      text-decoration: none;
+      transition: background-color 140ms ease, color 140ms ease;
+    }
+    .nav-link[aria-current="page"] {
+      background: var(--blue-soft);
+      color: #124f9d;
+    }
+    .nav-link[aria-current="page"]::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 9px;
+      bottom: 9px;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--blue);
+    }
+    .nav-link:hover {
+      background: var(--surface-inset);
+    }
+    .nav-link:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
+    .content-shell {
+      min-width: 0;
+    }
+    .page-panel {
+      min-width: 0;
+    }
+    .page-stack {
+      display: grid;
+      gap: 12px;
+    }
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+    .cards {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 12px;
+    }
+    .card {
+      min-height: 94px;
+      padding: 13px 14px;
+    }
+    .card-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .card-value {
+      display: block;
+      margin-top: 10px;
+      color: #142334;
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+      overflow-wrap: anywhere;
+    }
+    .card-note {
+      display: block;
+      margin-top: 8px;
+      color: var(--text-soft);
+      font-size: 12px;
+    }
+    .card.blocked {
+      border-top: 3px solid var(--red);
+    }
+    .card.allowed {
+      border-top: 3px solid var(--green);
+    }
+    .card.dropped {
+      border-top: 3px solid var(--amber);
+    }
+    .card.total {
+      border-top: 3px solid var(--blue);
+    }
+    .columns {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      margin-bottom: 12px;
+    }
+    .panel {
+      min-width: 0;
+      padding: 14px;
+    }

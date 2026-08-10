@@ -1,0 +1,76 @@
+{{define "page.blocklists"}}
+        <section id="panel-blocklists" class="page-panel" data-page="blocklists">
+          <section class="panel blocklists-panel">
+          <div class="panel-header">
+            <h3>Blocklists / adlists</h3>
+            <span id="blocklist-source-status">--</span>
+          </div>
+
+          <div class="blocklist-controls">
+            <div class="control-box">
+              <div class="control-row">
+                <div>
+                  <span class="control-title">Bundled default blocking</span>
+                  <span id="bundled-note" class="control-note">Checking config support...</span>
+                </div>
+                <button id="bundled-toggle" class="secondary" type="button" disabled>Unavailable</button>
+              </div>
+            </div>
+
+            <form id="blocklist-form" class="control-box form-grid">
+              <div>
+                <label for="blocklist-source">List URL or file path</label>
+                <input id="blocklist-source" name="source" type="text" autocomplete="off" required>
+              </div>
+              <div>
+                <label for="blocklist-source-type">Source</label>
+                <select id="blocklist-source-type" name="source_type">
+                  <option value="url">URL</option>
+                  <option value="path">Path</option>
+                </select>
+              </div>
+              <div>
+                <label for="blocklist-kind">Kind</label>
+                <select id="blocklist-kind" name="kind">
+                  <option value="deny">Deny</option>
+                  <option value="allow">Allow</option>
+                </select>
+              </div>
+              <label class="checkbox-line" for="blocklist-enabled">
+                <input id="blocklist-enabled" name="enabled" type="checkbox" checked>
+                Enabled
+              </label>
+              <button id="blocklist-add" type="submit">Add list</button>
+            </form>
+          </div>
+
+          <div class="table-wrap">
+            <table class="blocklist-table">
+              <colgroup>
+                <col class="blocklist-source-col">
+                <col class="blocklist-kind-col">
+                <col class="blocklist-status-col">
+                <col class="blocklist-updated-col">
+                <col class="blocklist-error-col">
+                <col class="blocklist-groups-col">
+                <col class="blocklist-actions-col">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Kind</th>
+                  <th>Status</th>
+                  <th>Last updated</th>
+                  <th>Error</th>
+                  <th>Groups</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="blocklist-body">
+                <tr><td colspan="7" class="loading">Loading blocklists...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </section>
+{{end}}

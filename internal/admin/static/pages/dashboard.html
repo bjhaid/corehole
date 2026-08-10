@@ -1,0 +1,79 @@
+{{define "page.dashboard"}}
+        <section id="panel-dashboard" class="page-panel page-stack" data-page="dashboard">
+          <section class="grid cards" aria-label="Status cards">
+            <article class="card total">
+              <span class="card-label">Total queries</span>
+              <span id="card-recent" class="card-value">--</span>
+              <span class="card-note">All-time DNS requests</span>
+            </article>
+            <article class="card blocked">
+              <span class="card-label">Blocked queries</span>
+              <span id="card-blocked" class="card-value">--</span>
+              <span class="card-note">All-time filtered DNS requests</span>
+            </article>
+            <article class="card allowed">
+              <span class="card-label">Allowed queries</span>
+              <span id="card-allowed" class="card-value">--</span>
+              <span class="card-note">All-time resolved DNS requests</span>
+            </article>
+            <article class="card dropped">
+              <span class="card-label">Dropped audit events</span>
+              <span id="card-dropped" class="card-value">--</span>
+              <span class="card-note">All-time audit sink backpressure</span>
+            </article>
+          </section>
+
+          <section class="grid columns">
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Blocking summary</h3>
+                <span>Policy configuration</span>
+              </div>
+              <dl class="kv">
+                <dt>Blocking response</dt>
+                <dd id="blocking-response">--</dd>
+                <dt>Bundled default</dt>
+                <dd id="bundled-state">--</dd>
+                <dt>Blocklist count</dt>
+                <dd id="blocklist-count">--</dd>
+                <dt>List status</dt>
+                <dd id="dashboard-blocklist-status">--</dd>
+              </dl>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Listeners</h3>
+                <span>Runtime addresses</span>
+              </div>
+              <dl class="kv">
+                <dt>DNS listen</dt>
+                <dd id="dashboard-dns-listen">--</dd>
+                <dt>Admin listen</dt>
+                <dd id="dashboard-admin-listen">--</dd>
+              </dl>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Upstream resolvers</h3>
+                <span id="dashboard-upstream-count">--</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Resolver</th>
+                      <th>Protocol</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashboard-upstream-body">
+                    <tr><td colspan="3" class="loading">Loading upstream resolvers...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+        </section>
+{{end}}

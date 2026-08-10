@@ -1,0 +1,124 @@
+{{define "page.queries"}}
+        <section id="panel-query-log" class="page-panel" data-page="queries">
+          <section class="panel query-panel">
+            <div class="panel-header">
+              <h3>Recent query log</h3>
+              <div class="query-header-actions">
+                <span id="query-count">--</span>
+                <div class="query-column-menu">
+                  <button id="query-column-toggle" class="icon-button" type="button" aria-label="Query log columns" aria-expanded="false" aria-controls="query-column-panel" title="Columns">⚙</button>
+                  <div id="query-column-panel" class="column-menu-panel hidden" role="menu" aria-label="Query log columns"></div>
+                </div>
+              </div>
+            </div>
+            <form id="query-filter-form" class="control-box query-filter-grid">
+              <div>
+                <label for="query-filter-from">From</label>
+                <input id="query-filter-from" name="from" type="datetime-local">
+              </div>
+              <div>
+                <label for="query-filter-to">To</label>
+                <input id="query-filter-to" name="to" type="datetime-local">
+              </div>
+              <div>
+                <label for="query-filter-client">Client IP</label>
+                <input id="query-filter-client" name="client_ip" type="search" autocomplete="off">
+              </div>
+              <div>
+                <label for="query-filter-domain">Domain</label>
+                <input id="query-filter-domain" name="domain" type="search" autocomplete="off">
+              </div>
+              <div>
+                <label for="query-filter-type">Type</label>
+                <select id="query-filter-type" name="type">
+                  <option value="">Any</option>
+                  <option value="A">A</option>
+                  <option value="AAAA">AAAA</option>
+                  <option value="CNAME">CNAME</option>
+                  <option value="MX">MX</option>
+                  <option value="TXT">TXT</option>
+                  <option value="PTR">PTR</option>
+                  <option value="NS">NS</option>
+                  <option value="SOA">SOA</option>
+                  <option value="SRV">SRV</option>
+                  <option value="HTTPS">HTTPS</option>
+                </select>
+              </div>
+              <div>
+                <label for="query-filter-action">Action</label>
+                <select id="query-filter-action" name="action">
+                  <option value="">Any</option>
+                  <option value="allow">allow</option>
+                  <option value="block">block</option>
+                  <option value="error">error</option>
+                </select>
+              </div>
+              <div>
+                <label for="query-filter-response">Response</label>
+                <select id="query-filter-response" name="response">
+                  <option value="">Any</option>
+                  <option value="NOERROR">NOERROR</option>
+                  <option value="NXDOMAIN">NXDOMAIN</option>
+                  <option value="REFUSED">REFUSED</option>
+                  <option value="SERVFAIL">SERVFAIL</option>
+                  <option value="FORMERR">FORMERR</option>
+                  <option value="NOTIMP">NOTIMP</option>
+                  <option value="0.0.0.0">0.0.0.0</option>
+                  <option value="::">::</option>
+                </select>
+              </div>
+              <div>
+                <label for="query-filter-rule-id">Rule ID</label>
+                <input id="query-filter-rule-id" name="rule_id" type="search" autocomplete="off">
+              </div>
+              <div>
+                <label for="query-filter-blocklist-id">Blocklist ID</label>
+                <input id="query-filter-blocklist-id" name="blocklist_id" type="search" autocomplete="off">
+              </div>
+              <div>
+                <label for="query-filter-duration-min">Min duration ms</label>
+                <input id="query-filter-duration-min" name="duration_min" type="number" min="0" step="1">
+              </div>
+              <div>
+                <label for="query-filter-duration-max">Max duration ms</label>
+                <input id="query-filter-duration-max" name="duration_max" type="number" min="0" step="1">
+              </div>
+              <div class="query-filter-actions">
+                <button id="query-filter-apply" type="submit">Apply</button>
+                <button id="query-filter-reset" class="secondary" type="reset">Reset</button>
+              </div>
+            </form>
+            <div class="table-wrap">
+              <table class="query-log-table">
+                <thead>
+                  <tr>
+                    <th data-column="time" data-query-sort-cell="timestamp"><button class="query-sort-button" type="button" data-query-sort="timestamp">Time <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="client" data-query-sort-cell="client_ip"><button class="query-sort-button" type="button" data-query-sort="client_ip">Client IP <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="domain" data-query-sort-cell="query_name"><button class="query-sort-button" type="button" data-query-sort="query_name">Domain <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="type" data-query-sort-cell="query_type"><button class="query-sort-button" type="button" data-query-sort="query_type">Type <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="action" data-query-sort-cell="action"><button class="query-sort-button" type="button" data-query-sort="action">Action <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="response" data-query-sort-cell="response"><button class="query-sort-button" type="button" data-query-sort="response">Response <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="duration" data-query-sort-cell="duration_ms"><button class="query-sort-button" type="button" data-query-sort="duration_ms">Duration ms <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="upstream" data-query-sort-cell="upstream_resolver"><button class="query-sort-button" type="button" data-query-sort="upstream_resolver">Upstream <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="cache" data-query-sort-cell="cache_status"><button class="query-sort-button" type="button" data-query-sort="cache_status">Cache <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="forward_duration" data-query-sort-cell="forward_duration_ms"><button class="query-sort-button" type="button" data-query-sort="forward_duration_ms">Forward ms <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="retries" data-query-sort-cell="retry_count"><button class="query-sort-button" type="button" data-query-sort="retry_count">Retries <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="forward_error" data-query-sort-cell="forward_error"><button class="query-sort-button" type="button" data-query-sort="forward_error">Upstream error <span class="query-sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th data-column="reason">Reason</th>
+                    <th data-column="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="query-body">
+                  <tr><td colspan="14" class="loading">Loading recent queries...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="query-pagination" aria-label="Query log pagination">
+              <button id="query-page-prev" class="secondary" type="button" disabled>Previous</button>
+              <button id="query-page-reload" class="secondary" type="button">Reload</button>
+              <span id="query-page-status">Page 1</span>
+              <button id="query-page-next" class="secondary" type="button" disabled>Next</button>
+            </div>
+          </section>
+        </section>
+{{end}}

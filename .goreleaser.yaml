@@ -1,0 +1,76 @@
+version: 2
+
+project_name: corehole
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: corehole
+    main: ./cmd/corehole
+    binary: corehole
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/bjhaid/corehole/internal/app.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+  - id: corehole-linux-arm
+    main: ./cmd/corehole
+    binary: corehole
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/bjhaid/corehole/internal/app.version={{ .Version }}
+    goos:
+      - linux
+    goarch:
+      - arm
+    goarm:
+      - "6"
+      - "7"
+
+archives:
+  - id: corehole-archives
+    ids:
+      - corehole
+      - corehole-linux-arm
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - docs/configuration.md
+      - corehole.yaml.example
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: bjhaid
+    name: corehole
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git
+  sort: asc

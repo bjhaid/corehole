@@ -1,0 +1,176 @@
+    @media (max-width: 1000px) {
+      .analytics-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 860px) {
+      .auth-grid,
+      .columns,
+      .analytics-settings,
+      .blocklist-controls,
+      .cards {
+        grid-template-columns: 1fr;
+      }
+      .auth-grid {
+        padding-top: 12px;
+      }
+      .auth-facts {
+        grid-template-columns: 1fr;
+      }
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .topbar-inner {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 12px 0;
+      }
+      .top-actions {
+        justify-content: flex-start;
+      }
+      .admin-layout {
+        grid-template-columns: 1fr;
+      }
+      .side-nav {
+        position: static;
+        display: flex;
+        overflow-x: auto;
+        scrollbar-width: thin;
+      }
+      .nav-link {
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .side-nav-title {
+        display: none;
+      }
+      .blocklist-table {
+        min-width: 1120px;
+      }
+    }
+    @media (max-width: 560px) {
+      main,
+      .topbar-inner {
+        width: min(100vw - 20px, 1180px);
+      }
+      .kv {
+        grid-template-columns: 1fr;
+      }
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+      .query-filter-grid {
+        grid-template-columns: 1fr;
+      }
+      .query-filter-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .query-pagination {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .api-key-form {
+        grid-template-columns: 1fr;
+      }
+      .analytics-settings-actions {
+        flex-direction: column;
+      }
+      .analytics-settings-actions button {
+        width: 100%;
+      }
+      .rule-form-grid,
+      .client-form-grid,
+      .group-form-grid,
+      .upstream-form {
+        grid-template-columns: 1fr;
+      }
+      .upstream-field-wide,
+      .upstream-actions {
+        grid-column: auto;
+      }
+      .upstream-actions button {
+        flex-basis: 100%;
+      }
+      .kv dt {
+        margin-top: 6px;
+      }
+      .card-value {
+        font-size: 24px;
+      }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        background: #0d1117;
+        color: #f0f3f6;
+        --surface: #161b22;
+        --surface-raised: #0f141b;
+        --surface-inset: #161b22;
+        --surface-muted: #0d1117;
+        --row-hover: #141b24;
+        --line: #30363d;
+        --line-strong: #48515d;
+        --text-muted: #9ba7b4;
+        --text-soft: #8793a1;
+        --blue-soft: #132a45;
+        --shadow: none;
+      }
+      body,
+      input,
+      select,
+      textarea,
+      .topbar,
+      .auth-card,
+      .auth-summary,
+      .card,
+      .panel,
+      table {
+        background: #0d1117;
+        color: #f0f3f6;
+      }
+      .topbar,
+      .auth-card,
+      .auth-summary,
+      .card,
+      .panel,
+      .table-wrap {
+        border-color: var(--line);
+      }
+      input {
+        border-color: var(--line-strong);
+      }
+      button.secondary,
+      .nav-link,
+      .control-box,
+      .fact {
+        background: var(--surface-inset);
+        color: #f0f3f6;
+      }
+      .nav-link:hover {
+        background: #1b232d;
+      }
+      .nav-link[aria-current="page"] {
+        background: var(--blue-soft);
+        color: #f0f3f6;
+      }
+      label,
+      th,
+      .kv dd,
+      .control-title,
+      .checkbox-line,
+      .card-value {
+        color: #f0f3f6;
+      }
+      th {
+        background: #141a22;
+      }
+      .pill {
+        background: #26313d;
+        color: #f0f3f6;
+      }
+      .bucket-tooltip {
+        background: #161b22;
+        color: #f0f3f6;
+      }
+    }

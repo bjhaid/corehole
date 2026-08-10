@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Corehole Admin - {{.Page.Title}}</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/assets/corehole-logo.svg">
+  <link rel="shortcut icon" href="/assets/assets/corehole-logo.svg">
+  <link rel="stylesheet" href="/assets/css/app.css">
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <img class="brand-mark" src="/assets/assets/corehole-logo.svg" alt="" width="28" height="28" aria-hidden="true">
+          <div>
+            <h1>Corehole</h1>
+            <p class="subtitle">DNS filtering admin console</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="session-state" class="session-state">Checking admin status...</span>
+          <button id="logout" class="secondary hidden" type="button">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="admin-main">
+      <section id="auth-view" class="auth-grid">
+        <div class="auth-summary">
+          <h2>Administration</h2>
+          <p id="summary">Checking admin status...</p>
+          <div class="auth-facts" aria-label="Console sections">
+            <div class="fact">
+              <strong>Dashboard</strong>
+              <span>All-time query volume and filtering outcomes.</span>
+            </div>
+            <div class="fact">
+              <strong>Blocking</strong>
+              <span>Response mode, list count, and upstream DNS.</span>
+            </div>
+            <div class="fact">
+              <strong>Queries</strong>
+              <span>Client, domain, response, and reason details.</span>
+            </div>
+            <div class="fact">
+              <strong>Analytics / Privacy</strong>
+              <span>Summaries, retention, cleanup, and privacy controls.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="auth-card">
+          <section id="setup-panel" class="hidden">
+            <h2>First-run setup</h2>
+            <p>Create the first admin password for this Corehole instance.</p>
+            <form id="setup">
+              <label for="setup-password">Admin password</label>
+              <input id="setup-password" name="password" type="password" autocomplete="new-password" required minlength="8">
+              <button type="submit">Create admin</button>
+            </form>
+          </section>
+
+          <section id="login-panel" class="hidden">
+            <h2>Log in</h2>
+            <p>Use the admin password to open the console.</p>
+            <form id="login">
+              <label for="login-password">Admin password</label>
+              <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+              <button type="submit">Log in</button>
+            </form>
+          </section>
+
+          <div id="message" class="status-line" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section id="app-view" class="admin-layout hidden">
+        <nav class="side-nav" aria-label="Admin sections">
+          <div class="side-nav-title">Administration</div>
+          {{range .Nav}}
+          <a id="nav-{{.Name}}" class="nav-link" href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>
+          {{end}}
+        </nav>
+
+        <div class="content-shell">
+          <div class="toolbar">
+            <div>
+              <h2>Admin console</h2>
+              <p id="updated">Loading console data...</p>
+            </div>
+          </div>
+
+          {{if eq .Page.Name "dashboard"}}{{template "page.dashboard" .}}{{end}}
+          {{if eq .Page.Name "queries"}}{{template "page.queries" .}}{{end}}
+          {{if eq .Page.Name "analytics"}}{{template "page.analytics" .}}{{end}}
+          {{if eq .Page.Name "blocklists"}}{{template "page.blocklists" .}}{{end}}
+          {{if eq .Page.Name "rules"}}{{template "page.rules" .}}{{end}}
+          {{if eq .Page.Name "clients-groups"}}{{template "page.clients-groups" .}}{{end}}
+          {{if eq .Page.Name "local-dns"}}{{template "page.local-dns" .}}{{end}}
+          {{if eq .Page.Name "settings"}}{{template "page.settings" .}}{{end}}
+        </div>
+      </section>
+    </main>
+  </div>
+  {{template "row.templates" .}}
+  <script>
+    window.__COREHOLE_PAGE__ = "{{.Page.Name}}";
+  </script>
+  <script type="module" src="/assets/js/pages/{{.Page.Script}}"></script>
+</body>
+</html>

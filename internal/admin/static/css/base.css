@@ -1,0 +1,100 @@
+    :root {
+      color-scheme: light dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6f8;
+      color: #17202a;
+      --surface: #ffffff;
+      --surface-raised: #ffffff;
+      --surface-inset: #f8fafc;
+      --surface-muted: #eef2f6;
+      --row-hover: #f6f9fc;
+      --line: #d8dee6;
+      --line-strong: #bdc7d3;
+      --text-muted: #586675;
+      --text-soft: #748295;
+      --blue: #1d6fd8;
+      --blue-soft: #e8f1fb;
+      --green: #18865a;
+      --red: #c0392b;
+      --amber: #a15c05;
+      --focus-ring: 0 0 0 3px rgb(29 111 216 / 0.24);
+      --shadow: 0 10px 32px rgb(31 42 55 / 0.08);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--surface-muted);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+    button {
+      min-height: 36px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 7px 12px;
+      background: var(--blue);
+      color: #ffffff;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+    }
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+      border-color: var(--blue);
+    }
+    button.secondary {
+      background: var(--surface);
+      border-color: var(--line-strong);
+      color: #243242;
+    }
+    button.danger {
+      background: #a93226;
+      color: #ffffff;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.68;
+    }
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: var(--surface);
+      color: inherit;
+      transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+    }
+    textarea {
+      min-height: 38px;
+      resize: vertical;
+    }
+    input[type="checkbox"] {
+      width: auto;
+      min-height: auto;
+    }
+    label {
+      display: block;
+      margin-bottom: 7px;
+      color: #344456;
+      font-size: 13px;
+      font-weight: 700;
+    }

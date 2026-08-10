@@ -1,0 +1,130 @@
+{{define "page.settings"}}
+        <section id="panel-settings" class="page-panel page-stack" data-page="settings">
+          <section class="grid columns settings-grid">
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Listeners</h3>
+                <span>Runtime addresses</span>
+              </div>
+              <dl class="kv">
+                <dt>DNS listen</dt>
+                <dd id="dns-listen">--</dd>
+                <dt>Admin listen</dt>
+                <dd id="admin-listen">--</dd>
+              </dl>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <h3>DNSSEC</h3>
+                <span id="dnssec-state">--</span>
+              </div>
+              <form id="dnssec-form" class="control-box dnssec-form">
+                <div>
+                  <label for="dnssec-mode">Mode</label>
+                  <select id="dnssec-mode" name="mode">
+                    <option value="off">Disabled / off</option>
+                    <option value="upstream">Upstream / trusted validating resolver</option>
+                  </select>
+                  <span id="dnssec-note" class="control-note">Local recursive validation is unavailable.</span>
+                </div>
+                <button id="dnssec-save" type="submit">Save DNSSEC</button>
+              </form>
+              <div id="dnssec-message" class="status-line dnssec-message" role="status" aria-live="polite"></div>
+            </article>
+
+            <article class="panel settings-upstream-panel">
+              <div class="panel-header">
+                <h3>Upstream resolvers</h3>
+                <span id="upstream-count">--</span>
+              </div>
+              <form id="upstream-form" class="control-box upstream-form">
+                <input id="upstream-index" name="index" type="hidden">
+                <div>
+                  <label for="upstream-name">Name</label>
+                  <input id="upstream-name" name="name" type="text" autocomplete="off" required>
+                </div>
+                <div class="upstream-field-wide">
+                  <label for="upstream-address">Address</label>
+                  <input id="upstream-address" name="address" type="text" autocomplete="off" required>
+                </div>
+                <div>
+                  <label for="upstream-protocol">Protocol</label>
+                  <select id="upstream-protocol" name="protocol">
+                    <option value="udp">UDP</option>
+                    <option value="tcp">TCP</option>
+                    <option value="tls">TLS</option>
+                    <option value="https">HTTPS</option>
+                    <option value="dns">DNS</option>
+                  </select>
+                </div>
+                <div class="upstream-field-wide">
+                  <label for="upstream-tls-server-name">TLS server name</label>
+                  <input id="upstream-tls-server-name" name="tls_server_name" type="text" autocomplete="off">
+                </div>
+                <label class="checkbox-line upstream-enabled-field" for="upstream-enabled">
+                  <input id="upstream-enabled" name="enabled" type="checkbox" checked>
+                  <span>Enabled</span>
+                </label>
+                <div class="upstream-actions">
+                  <button id="upstream-save" type="submit">Add resolver</button>
+                  <button id="upstream-cancel" class="secondary hidden" type="button">Cancel</button>
+                </div>
+              </form>
+              <div id="upstream-message" class="status-line upstream-message" role="status" aria-live="polite"></div>
+              <div class="table-wrap">
+                <table class="upstream-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Resolver</th>
+                      <th>Protocol</th>
+                      <th>Status</th>
+                      <th>TLS server name</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="upstream-body">
+                    <tr><td colspan="6" class="loading">Loading upstream resolvers...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>API keys</h3>
+              <span id="api-key-status">--</span>
+            </div>
+
+            <form id="api-key-form" class="control-box api-key-form">
+              <div>
+                <label for="api-key-name">Key name</label>
+                <input id="api-key-name" name="name" type="text" autocomplete="off" required>
+              </div>
+              <button id="api-key-create" type="submit">Create key</button>
+            </form>
+            <div id="api-key-secret" class="status-line api-key-secret" role="status" aria-live="polite"></div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Prefix</th>
+                    <th>Last 4</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="api-key-body">
+                  <tr><td colspan="7" class="loading">Loading API keys...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+{{end}}

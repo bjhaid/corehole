@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">Corehole logo</title>
+  <desc id="desc">A green shield with a stylized letter C and DNS node marks.</desc>
+  <rect width="320" height="320" rx="72" fill="#0d1117"/>
+  <path d="M160 38 64 78v76c0 64 39 111 96 128 57-17 96-64 96-128V78L160 38Z" fill="#0d7357"/>
+  <path d="M197 114c-11-12-24-18-40-18-34 0-58 25-58 64s24 64 58 64c17 0 31-6 42-19l-22-22c-5 6-11 9-19 9-17 0-28-13-28-32s11-32 28-32c8 0 14 3 19 9l20-23Z" fill="#ffffff"/>
+  <circle cx="224" cy="105" r="12" fill="#9be7c5"/>
+  <circle cx="224" cy="160" r="12" fill="#9be7c5"/>
+  <circle cx="224" cy="215" r="12" fill="#9be7c5"/>
+  <path d="M205 105h-34M205 160h-44M205 215h-34" stroke="#9be7c5" stroke-width="10" stroke-linecap="round"/>
+</svg>

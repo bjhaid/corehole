@@ -1,0 +1,395 @@
+import {initAdminPage} from "../admin.js";
+import {fetchJSON, fetchOptionalJSON} from "../lib/api.js";
+import {on, required} from "../lib/dom.js";
+import {actionButton, cell, configureTemplates, emptyRow, pill, setText} from "../lib/elements.js";
+import {boolLabel, displayValue, dnssecConfigValue, formatTime, listFrom, pick} from "../lib/format.js";
+import {setFormDisabled} from "../lib/forms.js";
+import {renderUpstreamRows} from "../lib/upstreams.js";
+
+function fields() {
+  return {
+    dnsListen: required("#dns-listen"),
+    adminListen: required("#admin-listen"),
+    dnssecState: required("#dnssec-state"),
+    dnssecForm: required("#dnssec-form"),
+    dnssecMode: required("#dnssec-mode"),
+    dnssecMessage: required("#dnssec-message"),
+    dnssecNote: required("#dnssec-note"),
+    upstreamCount: required("#upstream-count"),
+    upstreamForm: required("#upstream-form"),
+    upstreamIndex: required("#upstream-index"),
+    upstreamName: required("#upstream-name"),
+    upstreamAddress: required("#upstream-address"),
+    upstreamProtocol: required("#upstream-protocol"),
+    upstreamTLSServerName: required("#upstream-tls-server-name"),
+    upstreamEnabled: required("#upstream-enabled"),
+    upstreamSave: required("#upstream-save"),
+    upstreamCancel: required("#upstream-cancel"),
+    upstreamMessage: required("#upstream-message"),
+    upstreamBody: required("#upstream-body"),
+    apiKeyStatus: required("#api-key-status"),
+    apiKeyForm: required("#api-key-form"),
+    apiKeyName: required("#api-key-name"),
+    apiKeyCreate: required("#api-key-create"),
+    apiKeySecret: required("#api-key-secret"),
+    apiKeyBody: required("#api-key-body")
+  };
+}
+
+function normalizeAPIKeys(data) {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return listFrom(pick(data, ["api_keys", "apiKeys", "keys", "items", "results", "data"]));
+}
+
+function normalizeDNSSECConfig(data) {
+  const raw = dnssecConfigValue(data);
+  if (!raw || typeof raw !== "object") {
+    return {enabled: false, mode: "off"};
+  }
+  const enabled = Boolean(pick(raw, ["enabled"]));
+  let mode = String(pick(raw, ["mode"]) || "").toLowerCase();
+  if (enabled && mode === "") {
+    mode = "upstream";
+  }
+  if (mode !== "upstream" || !enabled) {
+    return {enabled: false, mode: "off"};
+  }
+  return {enabled: true, mode: "upstream"};
+}
+
+initAdminPage({
+  label: "Settings / API Keys",
+  init({setUpdated, setUpdatedStatus}) {
+    const target = fields();
+    let currentUpstreams = [];
+    let currentAPIKeys = [];
+    let configUpdateAvailable = true;
+    let apiKeysAvailable = false;
+
+    configureTemplates({
+      emptyRow: required("#template-empty-row"),
+      upstreamSettingsRow: required("#template-upstream-settings-row")
+    });
+
+    function setUpstreamMessage(text, isError) {
+      target.upstreamMessage.textContent = text || "";
+      target.upstreamMessage.classList.toggle("error", Boolean(isError));
+    }
+
+    function setDNSSECMessage(text, isError) {
+      target.dnssecMessage.textContent = text || "";
+      target.dnssecMessage.classList.toggle("error", Boolean(isError));
+    }
+
+    function setAPIKeyMessage(text, isError) {
+      target.apiKeySecret.textContent = text || "";
+      target.apiKeySecret.classList.toggle("error", Boolean(isError));
+    }
+
+    function resetUpstreamForm() {
+      target.upstreamIndex.value = "";
+      target.upstreamForm.reset();
+      target.upstreamProtocol.value = "udp";
+      target.upstreamEnabled.checked = true;
+      target.upstreamSave.textContent = "Add resolver";
+      target.upstreamCancel.classList.add("hidden");
+    }
+
+    function renderDNSSEC(data) {
+      const dnssec = normalizeDNSSECConfig(data);
+      target.dnssecMode.value = dnssec.mode;
+      target.dnssecState.textContent = dnssec.mode === "upstream"
+        ? "upstream trusted validation"
+        : "disabled";
+      target.dnssecNote.textContent = dnssec.mode === "upstream"
+        ? "Requests include DNSSEC flags for upstream validation; local recursive validation is unavailable."
+        : "DNSSEC assistance is off; local recursive validation is unavailable.";
+      setFormDisabled(target.dnssecForm, !configUpdateAvailable);
+    }
+
+    function renderConfig(result) {
+      if (!result.ok) {
+        target.dnsListen.textContent = "--";
+        target.adminListen.textContent = "--";
+        target.upstreamCount.textContent = "Unavailable";
+        target.upstreamBody.textContent = "";
+        target.upstreamBody.appendChild(emptyRow(6, "Config API unavailable."));
+        target.dnssecState.textContent = "unavailable";
+        setFormDisabled(target.upstreamForm, true);
+        setFormDisabled(target.dnssecForm, true);
+        return;
+      }
+
+      const data = result.data || {};
+      setText(target.dnsListen, pick(data, [
+        "dns_listen", "dnsListen", "dns_address", "dnsAddress", "listen_dns", "listenDNS", "dns.listen", "server.dns_listen", "server.dnsListen"
+      ]));
+      setText(target.adminListen, pick(data, [
+        "admin_listen", "adminListen", "admin_address", "adminAddress", "listen_admin", "listenAdmin", "admin.listen", "server.admin_listen", "server.adminListen"
+      ]));
+      currentUpstreams = renderUpstreamRows(listFrom(pick(data, [
+        "upstreams", "upstream_resolvers", "upstreamResolvers", "resolvers", "dns_upstreams", "dnsUpstreams", "dns.upstreams"
+      ])), target.upstreamCount, target.upstreamBody, true);
+      resetUpstreamForm();
+      setFormDisabled(target.upstreamForm, !configUpdateAvailable);
+      renderDNSSEC(data);
+    }
+
+    function renderAPIKeys(result) {
+      target.apiKeyBody.textContent = "";
+      setAPIKeyMessage("");
+      if (!result.ok) {
+        currentAPIKeys = [];
+        apiKeysAvailable = false;
+        target.apiKeyStatus.textContent = "Unavailable: " + displayValue(result.error);
+        target.apiKeyBody.appendChild(emptyRow(7, "API key management is unavailable."));
+        setFormDisabled(target.apiKeyForm, true);
+        return;
+      }
+
+      currentAPIKeys = normalizeAPIKeys(result.data);
+      apiKeysAvailable = true;
+      target.apiKeyStatus.textContent = currentAPIKeys.length + " keys";
+      setFormDisabled(target.apiKeyForm, false);
+
+      if (!currentAPIKeys.length) {
+        target.apiKeyBody.appendChild(emptyRow(7, "No API keys created."));
+        return;
+      }
+
+      for (const key of currentAPIKeys) {
+        const id = pick(key, ["id"]);
+        const revokedAt = pick(key, ["revoked_at", "revokedAt"]);
+        const disabled = Boolean(pick(key, ["disabled"])) || Boolean(revokedAt);
+        const tr = document.createElement("tr");
+        tr.appendChild(cell(pick(key, ["name"])));
+        tr.appendChild(cell(pick(key, ["prefix"])));
+        tr.appendChild(cell(pick(key, ["last4", "last_4", "lastFour"])));
+        tr.appendChild(cell(formatTime(pick(key, ["created_at", "createdAt"]))));
+        tr.appendChild(cell(formatTime(pick(key, ["last_used_at", "lastUsedAt"]))));
+        const status = document.createElement("td");
+        status.className = "status-cell";
+        status.appendChild(pill(disabled ? "revoked" : "active", disabled ? "drop" : "allow"));
+        tr.appendChild(status);
+        const actions = document.createElement("td");
+        if (disabled) {
+          actions.textContent = "--";
+        } else {
+          const actionWrap = document.createElement("div");
+          actionWrap.className = "table-actions";
+          actionWrap.appendChild(actionButton("Revoke", "revoke", id, "danger"));
+          actions.appendChild(actionWrap);
+        }
+        tr.appendChild(actions);
+        target.apiKeyBody.appendChild(tr);
+      }
+    }
+
+    async function refresh() {
+      const [config, keys] = await Promise.all([
+        fetchOptionalJSON("/api/config"),
+        fetchOptionalJSON("/api/api-keys")
+      ]);
+      renderConfig(config);
+      renderAPIKeys(keys);
+      setUpdatedStatus("Settings / API Keys");
+    }
+
+    function upstreamFormPayload() {
+      return {
+        name: target.upstreamName.value.trim(),
+        address: target.upstreamAddress.value.trim(),
+        protocol: target.upstreamProtocol.value.trim() || "udp",
+        tls_server_name: target.upstreamTLSServerName.value.trim(),
+        enabled: target.upstreamEnabled.checked
+      };
+    }
+
+    function upstreamConfigPayload(upstreams) {
+      return upstreams.map(upstream => ({
+        name: upstream.name || "",
+        address: upstream.address || "",
+        protocol: upstream.protocol || "udp",
+        tls_server_name: upstream.tls_server_name || "",
+        enabled: Boolean(upstream.enabled)
+      }));
+    }
+
+    async function saveUpstreams(upstreams) {
+      setUpstreamMessage("");
+      const result = await fetchJSON("/api/config", {
+        method: "PUT",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({dns: {resolvers: upstreamConfigPayload(upstreams)}})
+      });
+      renderConfig({ok: true, data: result.config || {}});
+      const status = result.restart_required
+        ? "Upstream resolver config saved. Process restart required."
+        : "Upstream resolver config applied immediately.";
+      setUpstreamMessage(status, false);
+      setUpdated(status);
+    }
+
+    async function saveDNSSEC(event) {
+      event.preventDefault();
+      const mode = target.dnssecMode.value === "upstream" ? "upstream" : "off";
+      setFormDisabled(target.dnssecForm, true);
+      setDNSSECMessage("Saving DNSSEC settings...");
+      try {
+        const result = await fetchJSON("/api/config", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({dns: {dnssec: {enabled: mode === "upstream", mode: mode}}})
+        });
+        renderConfig({ok: true, data: result.config || {}});
+        const status = result.restart_required
+          ? "DNSSEC config saved. Process restart required."
+          : "DNSSEC config applied through DNS hot reload.";
+        setDNSSECMessage(status, false);
+        setUpdated(status);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setDNSSECMessage("DNSSEC update failed: " + err.message, true);
+      } finally {
+        setFormDisabled(target.dnssecForm, !configUpdateAvailable);
+      }
+    }
+
+    async function submitUpstream(event) {
+      event.preventDefault();
+      const next = currentUpstreams.slice();
+      const payload = upstreamFormPayload();
+      const index = target.upstreamIndex.value === "" ? -1 : Number(target.upstreamIndex.value);
+      if (index >= 0 && index < next.length) {
+        next[index] = payload;
+      } else {
+        next.push(payload);
+      }
+      setFormDisabled(target.upstreamForm, true);
+      try {
+        await saveUpstreams(next);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setUpstreamMessage("Upstream resolver update failed: " + err.message, true);
+      } finally {
+        setFormDisabled(target.upstreamForm, !configUpdateAvailable);
+      }
+    }
+
+    async function handleUpstreamAction(button) {
+      const index = Number(button.dataset.id);
+      if (!Number.isInteger(index) || index < 0 || index >= currentUpstreams.length) {
+        return;
+      }
+      const upstream = currentUpstreams[index];
+      if (button.dataset.action === "edit-upstream") {
+        target.upstreamIndex.value = String(index);
+        target.upstreamName.value = upstream.name || "";
+        target.upstreamAddress.value = upstream.address || "";
+        target.upstreamProtocol.value = upstream.protocol || "udp";
+        target.upstreamTLSServerName.value = upstream.tls_server_name || "";
+        target.upstreamEnabled.checked = Boolean(upstream.enabled);
+        target.upstreamSave.textContent = "Save resolver";
+        target.upstreamCancel.classList.remove("hidden");
+        target.upstreamName.focus();
+        return;
+      }
+
+      const next = currentUpstreams.slice();
+      if (button.dataset.action === "toggle-upstream") {
+        next[index] = Object.assign({}, upstream, {enabled: !upstream.enabled});
+      } else if (button.dataset.action === "delete-upstream") {
+        next.splice(index, 1);
+      } else {
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        await saveUpstreams(next);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setUpstreamMessage("Upstream resolver update failed: " + err.message, true);
+        button.disabled = false;
+      }
+    }
+
+    function apiKeyByID(id) {
+      return currentAPIKeys.find(key => String(pick(key, ["id"])) === String(id));
+    }
+
+    async function createAPIKey(event) {
+      event.preventDefault();
+      if (!apiKeysAvailable) {
+        setAPIKeyMessage("API key management is unavailable.", true);
+        return;
+      }
+      const name = target.apiKeyName.value.trim();
+      if (!name) {
+        setAPIKeyMessage("Key name is required.", true);
+        return;
+      }
+
+      target.apiKeyCreate.disabled = true;
+      try {
+        const created = await fetchJSON("/api/api-keys", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({name: name})
+        });
+        target.apiKeyName.value = "";
+        renderAPIKeys(await fetchOptionalJSON("/api/api-keys"));
+        setAPIKeyMessage("New API key: " + displayValue(pick(created || {}, ["key"])) + " Store it now; it will not be shown again.", false);
+      } catch (err) {
+        setAPIKeyMessage("API key create failed: " + err.message, true);
+      } finally {
+        target.apiKeyCreate.disabled = !apiKeysAvailable;
+      }
+    }
+
+    async function handleAPIKeyAction(event) {
+      const button = event.target.closest("button[data-action]");
+      if (!button) {
+        return;
+      }
+      const key = apiKeyByID(button.dataset.id);
+      if (!key || !window.confirm("Revoke this API key?")) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        await fetchJSON("/api/api-keys/" + encodeURIComponent(pick(key, ["id"])), {method: "DELETE"});
+        renderAPIKeys(await fetchOptionalJSON("/api/api-keys"));
+        setAPIKeyMessage("API key revoked.", false);
+      } catch (err) {
+        setAPIKeyMessage("API key revoke failed: " + err.message, true);
+        button.disabled = false;
+      }
+    }
+
+    on(target.dnssecForm, "submit", saveDNSSEC);
+    on(target.upstreamForm, "submit", submitUpstream);
+    on(target.upstreamCancel, "click", () => {
+      resetUpstreamForm();
+      setUpstreamMessage("");
+    });
+    on(target.upstreamBody, "click", event => {
+      const button = event.target.closest("button[data-action]");
+      if (button) {
+        handleUpstreamAction(button);
+      }
+    });
+    on(target.apiKeyForm, "submit", createAPIKey);
+    on(target.apiKeyBody, "click", handleAPIKeyAction);
+
+    return {refresh};
+  }
+});

@@ -1,0 +1,15 @@
+dns:
+  listen: ":53"
+  resolvers:
+    - name: cloudflare
+      address: "1.1.1.1:53"
+      protocol: udp
+      enabled: true
+admin:
+  listen: "127.0.0.1:8080"
+storage:
+  path: "./corehole.db"
+blocking:
+  response: nxdomain
+  bundled: true
+  blocklists: []

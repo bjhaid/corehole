@@ -1,0 +1,62 @@
+{{define "page.rules"}}
+        <section id="panel-rules" class="page-panel" data-page="rules">
+        <section class="panel management-panel">
+          <div class="panel-header">
+            <h3>Rules</h3>
+            <span id="rule-status">--</span>
+          </div>
+
+          <form id="rule-form" class="control-box rule-form-grid">
+            <input id="rule-id" name="id" type="hidden">
+            <div>
+              <label for="rule-pattern">Domain or regex</label>
+              <input id="rule-pattern" name="pattern" type="text" autocomplete="off" required>
+            </div>
+            <div>
+              <label for="rule-kind">Kind</label>
+              <select id="rule-kind" name="kind">
+                <option value="deny">Deny</option>
+                <option value="allow">Allow</option>
+              </select>
+            </div>
+            <div>
+              <label for="rule-match-type">Match</label>
+              <select id="rule-match-type" name="match_type">
+                <option value="exact">Exact</option>
+                <option value="suffix">Suffix</option>
+                <option value="regex">Regex</option>
+              </select>
+            </div>
+            <div>
+              <label for="rule-comment">Comment</label>
+              <input id="rule-comment" name="comment" type="text" autocomplete="off">
+            </div>
+            <label class="checkbox-line" for="rule-enabled">
+              <input id="rule-enabled" name="enabled" type="checkbox" checked>
+              Enabled
+            </label>
+            <button id="rule-save" type="submit">Add rule</button>
+            <button id="rule-cancel" class="secondary hidden" type="button">Cancel</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pattern</th>
+                  <th>Kind</th>
+                  <th>Match</th>
+                  <th>Status</th>
+                  <th>Comment</th>
+                  <th>Groups</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rule-body">
+                <tr><td colspan="7" class="loading">Loading rules...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </section>
+{{end}}

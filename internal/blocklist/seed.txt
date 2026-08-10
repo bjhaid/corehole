@@ -1,0 +1,15 @@
+# Corehole bundled seed blocklist.
+# This is intentionally small and deterministic. It is not copied from a
+# third-party blocklist.
+blocked.example
+ads.google.com
+pagead2.googlesyndication.com
+googleads.g.doubleclick.net
+ad.doubleclick.net
+static.doubleclick.net
+www.google-analytics.com
+ssl.google-analytics.com
+analytics.google.com
+connect.facebook.net
+pixel.facebook.com
+sb.scorecardresearch.com

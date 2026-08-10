@@ -1,0 +1,80 @@
+{{define "row.templates"}}
+  <template id="template-empty-row">
+    <tr><td data-field="message" class="empty"></td></tr>
+  </template>
+  <template id="template-analytics-total-row">
+    <tr>
+      <td data-field="name" class="analytics-name-cell"></td>
+      <td data-field="count" class="analytics-count-cell"></td>
+    </tr>
+  </template>
+  <template id="template-analytics-frequency-row">
+    <tr>
+      <td data-field="name" class="analytics-name-cell"></td>
+      <td data-field="count" class="analytics-count-cell"></td>
+      <td class="frequency-cell">
+        <div class="frequency-bar" aria-hidden="true">
+          <div data-field="frequency-fill" class="frequency-fill"></div>
+        </div>
+        <span data-field="frequency-label" class="frequency-label"></span>
+      </td>
+    </tr>
+  </template>
+  <template id="template-bucket-chart-column">
+    <div class="bucket-column" role="listitem">
+      <div class="bucket-bar-rail">
+        <div data-field="bar" class="bucket-bar">
+          <div data-field="segment-allowed" class="bucket-segment allowed"></div>
+          <div data-field="segment-blocked" class="bucket-segment blocked"></div>
+          <div data-field="segment-other" class="bucket-segment other"></div>
+        </div>
+      </div>
+      <div data-field="label" class="bucket-label"></div>
+    </div>
+  </template>
+  <template id="template-upstream-dashboard-row">
+    <tr>
+      <td data-field="resolver"></td>
+      <td data-field="protocol"></td>
+      <td><span data-field="status" class="pill"></span></td>
+    </tr>
+  </template>
+  <template id="template-upstream-settings-row">
+    <tr>
+      <td data-field="name"></td>
+      <td data-field="resolver"></td>
+      <td data-field="protocol"></td>
+      <td><span data-field="status" class="pill"></span></td>
+      <td data-field="tls-server-name"></td>
+      <td>
+        <div class="table-actions">
+          <button data-action="edit-upstream" class="secondary" type="button">Edit</button>
+          <button data-action="toggle-upstream" class="secondary" type="button"></button>
+          <button data-action="delete-upstream" class="danger" type="button">Remove</button>
+        </div>
+      </td>
+    </tr>
+  </template>
+  <template id="template-query-row">
+    <tr>
+      <td data-column="time" data-field="time"></td>
+      <td data-column="client" data-field="client"></td>
+      <td data-column="domain" data-field="domain"></td>
+      <td data-column="type" data-field="type"></td>
+      <td data-column="action"><span data-field="action" class="pill"></span></td>
+      <td data-column="response" data-field="response"></td>
+      <td data-column="duration" data-field="duration-ms"></td>
+      <td data-column="upstream" data-field="upstream"></td>
+      <td data-column="cache" data-field="cache-status"></td>
+      <td data-column="forward_duration" data-field="forward-duration-ms"></td>
+      <td data-column="retries" data-field="retries"></td>
+      <td data-column="forward_error" data-field="forward-error"></td>
+      <td data-column="reason" data-field="reason"></td>
+      <td data-column="actions">
+        <div class="table-actions query-row-actions">
+          <button data-action="block-domain" class="secondary" type="button">Block</button>
+        </div>
+      </td>
+    </tr>
+  </template>
+{{end}}
