@@ -53,8 +53,9 @@ func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 	assertTableExists(t, ctx, store, "filter_rule_groups")
 	assertTableExists(t, ctx, store, "audit_settings")
 	assertTableExists(t, ctx, store, "api_keys")
+	assertTableExists(t, ctx, store, "admin_sessions")
 
-	for _, version := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
+	for _, version := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
 		var migrations int
 		if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&migrations); err != nil {
 			t.Fatalf("query schema_migrations version %d: %v", version, err)
@@ -81,6 +82,7 @@ func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 		"audit_events_cache_status_idx",
 		"audit_events_forward_duration_ns_idx",
 		"audit_events_retry_count_idx",
+		"admin_sessions_expires_at_idx",
 	} {
 		assertIndexExists(t, ctx, store, index)
 	}
@@ -151,8 +153,8 @@ func TestOpenMigrationsAreIdempotent(t *testing.T) {
 	if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrations); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if migrations != 10 {
-		t.Fatalf("migration rows = %d, want 10", migrations)
+	if migrations != 11 {
+		t.Fatalf("migration rows = %d, want 11", migrations)
 	}
 }
 

@@ -111,6 +111,7 @@ func Serve(ctx context.Context, args []string) error {
 		Addr: cfg.Admin.Listen,
 		Handler: admin.NewServer(
 			admin.NewSQLiteUserStore(store.DB()),
+			admin.WithSessionStore(admin.NewSQLiteSessionStore(store.DB())),
 			admin.WithSecureCookie(false),
 			admin.WithConfigSnapshot(adminConfigSnapshot(cfg)),
 			admin.WithConfigStoreAndDNSReloader(cfgStore, dnsRuntimeReloader{server: dnsServer}),
