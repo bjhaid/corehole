@@ -37,7 +37,8 @@ func TestLocalDNSAPIRequiresSession(t *testing.T) {
 
 func TestLocalDNSAPICRUD(t *testing.T) {
 	store := newFakeLocalDNSStore()
-	server := newTestServer(WithLocalDNSStore(store))
+	reloader := &fakeLocalDNSReloader{}
+	server := newTestServer(WithLocalDNSStore(store), WithLocalDNSReloader(reloader))
 	cookie := setupSession(t, server)
 
 	create := requestJSON(t, server, http.MethodPost, "/api/localdns/records", map[string]any{
@@ -54,6 +55,9 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 	created := decodeResponse[localdns.Record](t, create)
 	if created.ID == 0 || created.Name != "host.example" || created.Value != "192.0.2.55" || created.TTL != 120 || !created.Enabled {
 		t.Fatalf("created record = %#v", created)
+	}
+	if reloader.count != 1 {
+		t.Fatalf("reload count after create = %d, want 1", reloader.count)
 	}
 
 	list := get(t, server, "/api/localdns/records", cookie)
@@ -79,6 +83,9 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 	if updated.Type != localdns.TypeCNAME || updated.Value != "host.example" || updated.Enabled {
 		t.Fatalf("updated record = %#v", updated)
 	}
+	if reloader.count != 2 {
+		t.Fatalf("reload count after update = %d, want 2", reloader.count)
+	}
 
 	getOne := get(t, server, "/api/localdns/records/1", cookie)
 	if getOne.Code != http.StatusOK {
@@ -91,6 +98,9 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 	deleteRes := requestJSON(t, server, http.MethodDelete, "/api/localdns/records/1", nil, cookie)
 	if deleteRes.Code != http.StatusNoContent {
 		t.Fatalf("delete status code = %d, want %d", deleteRes.Code, http.StatusNoContent)
+	}
+	if reloader.count != 3 {
+		t.Fatalf("reload count after delete = %d, want 3", reloader.count)
 	}
 
 	missing := get(t, server, "/api/localdns/records/1", cookie)
@@ -206,4 +216,13 @@ func (s *fakeLocalDNSStore) Delete(_ context.Context, id int64) error {
 
 func (s *fakeLocalDNSStore) ListEnabled(context.Context) ([]localdns.Record, error) {
 	return nil, errors.New("unused")
+}
+
+type fakeLocalDNSReloader struct {
+	count int
+}
+
+func (r *fakeLocalDNSReloader) ReloadLocalDNS(context.Context) error {
+	r.count++
+	return nil
 }

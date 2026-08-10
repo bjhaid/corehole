@@ -20,6 +20,7 @@ type Server struct {
 	auditReader    AuditReader
 	configSource   ConfigSource
 	localDNS       LocalDNSStore
+	localDNSReload LocalDNSReloader
 	filterService  FilterService
 	filterReloader FilterReloader
 	mux            *http.ServeMux

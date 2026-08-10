@@ -2,6 +2,7 @@ package localdns
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -96,4 +97,58 @@ func resolve(t *testing.T, resolver *DNSResolver, name string, qtype uint16) *dn
 		t.Fatalf("response rcode=%d authoritative=%v", msg.Rcode, msg.Authoritative)
 	}
 	return msg
+}
+
+func BenchmarkStaticResolverResolve(b *testing.B) {
+	records := benchmarkRecords(1000)
+	resolver := NewStaticResolver(records)
+	req := benchmarkRequest("host-500.example.", dns.TypeA)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		msg, ok, err := resolver.Resolve(context.Background(), req)
+		if err != nil || !ok || len(msg.Answer) != 1 {
+			b.Fatalf("Resolve() ok=%t err=%v answers=%d", ok, err, len(msg.Answer))
+		}
+	}
+}
+
+func BenchmarkDynamicResolverResolve(b *testing.B) {
+	records := benchmarkRecords(1000)
+	resolver := NewDNSResolver(benchmarkSource(records))
+	req := benchmarkRequest("host-500.example.", dns.TypeA)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		msg, ok, err := resolver.Resolve(context.Background(), req)
+		if err != nil || !ok || len(msg.Answer) != 1 {
+			b.Fatalf("Resolve() ok=%t err=%v answers=%d", ok, err, len(msg.Answer))
+		}
+	}
+}
+
+func benchmarkRecords(count int) []Record {
+	records := make([]Record, 0, count)
+	for i := 0; i < count; i++ {
+		records = append(records, Record{
+			Name:    fmt.Sprintf("host-%d.example", i),
+			Type:    TypeA,
+			Value:   fmt.Sprintf("192.0.2.%d", i%255),
+			TTL:     60,
+			Enabled: true,
+		})
+	}
+	return records
+}
+
+func benchmarkRequest(name string, qtype uint16) *dns.Msg {
+	req := new(dns.Msg)
+	req.SetQuestion(name, qtype)
+	return req
+}
+
+type benchmarkSource []Record
+
+func (s benchmarkSource) ListEnabled(context.Context) ([]Record, error) {
+	return append([]Record(nil), s...), nil
 }

@@ -94,7 +94,13 @@ func Serve(ctx context.Context, args []string) error {
 	}()
 
 	localDNSRepo := localdns.NewSQLiteRepository(store.DB())
-	runtime.SetLocalResolver(localdns.NewDNSResolver(localDNSRepo))
+	localDNSReloader := localDNSRuntimeReloader{
+		store:   localDNSRepo,
+		runtime: runtime,
+	}
+	if err := localDNSReloader.ReloadLocalDNS(ctx); err != nil {
+		return fmt.Errorf("local dns runtime: %w", err)
+	}
 
 	adminListener, err := net.Listen("tcp", cfg.Admin.Listen)
 	if err != nil {
@@ -117,6 +123,7 @@ func Serve(ctx context.Context, args []string) error {
 			admin.WithConfigStoreAndDNSReloader(cfgStore, dnsRuntimeReloader{server: dnsServer}),
 			admin.WithAuditReader(auditSink),
 			admin.WithLocalDNSStore(localDNSRepo),
+			admin.WithLocalDNSReloader(localDNSReloader),
 			admin.WithFilterService(filterService),
 			admin.WithFilterReloader(runtimeBlocklistReloader{
 				manager: blocklistManager,
@@ -188,6 +195,31 @@ func (r runtimeBlocklistReloader) Reload(ctx context.Context) error {
 		runtime = coreplugin.Current()
 	}
 	runtime.SetDecider(r.manager)
+	return nil
+}
+
+type localDNSEnabledStore interface {
+	ListEnabled(context.Context) ([]localdns.Record, error)
+}
+
+type localDNSRuntimeReloader struct {
+	store   localDNSEnabledStore
+	runtime *coreplugin.Runtime
+}
+
+func (r localDNSRuntimeReloader) ReloadLocalDNS(ctx context.Context) error {
+	if r.store == nil {
+		return nil
+	}
+	records, err := r.store.ListEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	runtime := r.runtime
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	runtime.SetLocalResolver(localdns.NewStaticResolver(records))
 	return nil
 }
 

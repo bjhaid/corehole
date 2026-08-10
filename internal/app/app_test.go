@@ -14,7 +14,9 @@ import (
 	"github.com/bjhaid/corehole/internal/coreplugin"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
 	"github.com/bjhaid/corehole/internal/filter"
+	"github.com/bjhaid/corehole/internal/localdns"
 	"github.com/bjhaid/corehole/internal/storage"
+	"github.com/miekg/dns"
 )
 
 func TestStartupConfigLocalBlocklistBlocksAdzerk(t *testing.T) {
@@ -208,6 +210,88 @@ func TestDNSRuntimeReloaderInvokesCoreDNSServerReload(t *testing.T) {
 	if server.last.DNS.Listen != cfg.DNS.Listen {
 		t.Fatalf("reloaded config DNS listen = %q, want %q", server.last.DNS.Listen, cfg.DNS.Listen)
 	}
+}
+
+func TestLocalDNSRuntimeReloaderInstallsStaticRuntimeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	runtime := coreplugin.NewRuntime()
+	store := staticEnabledLocalDNSStore{records: []localdns.Record{
+		{
+			Name:    "router.lan",
+			Type:    localdns.TypeA,
+			Value:   "192.0.2.1",
+			TTL:     60,
+			Enabled: true,
+		},
+	}}
+	reloader := localDNSRuntimeReloader{store: store, runtime: runtime}
+
+	if err := reloader.ReloadLocalDNS(ctx); err != nil {
+		t.Fatalf("ReloadLocalDNS() error = %v", err)
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion("router.lan.", dns.TypeA)
+	res, ok, err := runtime.ResolveLocal(ctx, req)
+	if err != nil {
+		t.Fatalf("ResolveLocal() error = %v", err)
+	}
+	if !ok || len(res.Answer) != 1 {
+		t.Fatalf("ResolveLocal() ok=%t answers=%d, want one local answer", ok, len(res.Answer))
+	}
+}
+
+func TestLocalDNSRuntimeSnapshotDoesNotReadStoreDuringResolution(t *testing.T) {
+	ctx := context.Background()
+	runtime := coreplugin.NewRuntime()
+	store := &countingEnabledLocalDNSStore{records: []localdns.Record{
+		{
+			Name:    "router.lan",
+			Type:    localdns.TypeA,
+			Value:   "192.0.2.1",
+			TTL:     60,
+			Enabled: true,
+		},
+	}}
+	reloader := localDNSRuntimeReloader{store: store, runtime: runtime}
+
+	if err := reloader.ReloadLocalDNS(ctx); err != nil {
+		t.Fatalf("ReloadLocalDNS() error = %v", err)
+	}
+	store.records = nil
+
+	req := new(dns.Msg)
+	req.SetQuestion("router.lan.", dns.TypeA)
+	for i := 0; i < 100; i++ {
+		res, ok, err := runtime.ResolveLocal(ctx, req)
+		if err != nil {
+			t.Fatalf("ResolveLocal() error = %v", err)
+		}
+		if !ok || len(res.Answer) != 1 {
+			t.Fatalf("ResolveLocal() ok=%t answers=%d, want one local answer", ok, len(res.Answer))
+		}
+	}
+	if store.calls != 1 {
+		t.Fatalf("ListEnabled calls = %d, want only the initial reload call", store.calls)
+	}
+}
+
+type staticEnabledLocalDNSStore struct {
+	records []localdns.Record
+}
+
+func (s staticEnabledLocalDNSStore) ListEnabled(context.Context) ([]localdns.Record, error) {
+	return append([]localdns.Record(nil), s.records...), nil
+}
+
+type countingEnabledLocalDNSStore struct {
+	records []localdns.Record
+	calls   int
+}
+
+func (s *countingEnabledLocalDNSStore) ListEnabled(context.Context) ([]localdns.Record, error) {
+	s.calls++
+	return append([]localdns.Record(nil), s.records...), nil
 }
 
 func testConfig(dbPath string) config.Config {

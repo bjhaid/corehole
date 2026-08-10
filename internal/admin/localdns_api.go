@@ -18,10 +18,22 @@ type LocalDNSStore interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+type LocalDNSReloader interface {
+	ReloadLocalDNS(ctx context.Context) error
+}
+
 func WithLocalDNSStore(store LocalDNSStore) Option {
 	return func(s *Server) {
 		if store != nil {
 			s.localDNS = store
+		}
+	}
+}
+
+func WithLocalDNSReloader(reloader LocalDNSReloader) Option {
+	return func(s *Server) {
+		if reloader != nil {
+			s.localDNSReload = reloader
 		}
 	}
 }
@@ -56,6 +68,9 @@ func (s *Server) handleLocalDNSRecords(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "localdns_create_failed")
+			return
+		}
+		if !s.reloadLocalDNS(w, r) {
 			return
 		}
 		writeJSON(w, http.StatusCreated, record)
@@ -93,16 +108,33 @@ func (s *Server) handleLocalDNSRecord(w http.ResponseWriter, r *http.Request) {
 			handleLocalDNSError(w, err, "localdns_update_failed")
 			return
 		}
+		if !s.reloadLocalDNS(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusOK, record)
 	case http.MethodDelete:
 		if err := store.Delete(r.Context(), id); err != nil {
 			handleLocalDNSError(w, err, "localdns_delete_failed")
 			return
 		}
+		if !s.reloadLocalDNS(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) reloadLocalDNS(w http.ResponseWriter, r *http.Request) bool {
+	if s.localDNSReload == nil {
+		return true
+	}
+	if err := s.localDNSReload.ReloadLocalDNS(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "localdns_reload_failed")
+		return false
+	}
+	return true
 }
 
 func (s *Server) localDNSStore(w http.ResponseWriter) (LocalDNSStore, bool) {

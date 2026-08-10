@@ -51,6 +51,28 @@ func TestSQLiteSinkFlushesFullBatchAndReturnsRecentEvents(t *testing.T) {
 	}
 }
 
+func TestSQLiteSinkRecordDropsInsteadOfBlockingWhenQueueIsFull(t *testing.T) {
+	sink := &SQLiteSink{
+		events: make(chan Event, 1),
+	}
+	sink.events <- testEvent(time.Now(), "queued.example.")
+
+	done := make(chan struct{})
+	go func() {
+		sink.Record(context.Background(), testEvent(time.Now(), "dropped.example."))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Record blocked on a full queue")
+	}
+	if dropped := sink.Dropped(); dropped != 1 {
+		t.Fatalf("dropped events = %d, want 1", dropped)
+	}
+}
+
 func TestSQLiteSinkCloseFlushesPartialBatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, ctx)

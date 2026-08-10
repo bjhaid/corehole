@@ -16,6 +16,7 @@ type Source interface {
 
 type DNSResolver struct {
 	source Source
+	index  map[string][]Record
 }
 
 func NewDNSResolver(source Source) *DNSResolver {
@@ -23,11 +24,11 @@ func NewDNSResolver(source Source) *DNSResolver {
 }
 
 func NewStaticResolver(records []Record) *DNSResolver {
-	return NewDNSResolver(staticSource(records))
+	return &DNSResolver{index: indexRecords(records)}
 }
 
 func (r *DNSResolver) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, bool, error) {
-	if r == nil || r.source == nil || req == nil || len(req.Question) == 0 {
+	if r == nil || (r.source == nil && r.index == nil) || req == nil || len(req.Question) == 0 {
 		return nil, false, nil
 	}
 
@@ -41,11 +42,14 @@ func (r *DNSResolver) Resolve(ctx context.Context, req *dns.Msg) (*dns.Msg, bool
 		return nil, false, nil
 	}
 
-	records, err := r.source.ListEnabled(ctx)
-	if err != nil {
-		return nil, false, err
+	index := r.index
+	if index == nil {
+		records, err := r.source.ListEnabled(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		index = indexRecords(records)
 	}
-	index := indexRecords(records)
 
 	res := new(dns.Msg)
 	res.SetReply(req)
@@ -175,16 +179,4 @@ func indexRecords(records []Record) map[string][]Record {
 		index[name] = append(index[name], record)
 	}
 	return index
-}
-
-type staticSource []Record
-
-func (s staticSource) ListEnabled(context.Context) ([]Record, error) {
-	records := make([]Record, 0, len(s))
-	for _, record := range s {
-		if record.Enabled {
-			records = append(records, record)
-		}
-	}
-	return records, nil
 }
