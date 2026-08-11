@@ -38,6 +38,7 @@ func Corefile(cfg config.Config) string {
 			Enabled:       true,
 		}})
 	}
+	writeRewrites(&b, cfg.DNS.Rewrites)
 	writeForward(&b, ".", forwardResolversFromConfig(cfg.DNS.Resolvers))
 	b.WriteString("}\n")
 	return b.String()
@@ -101,6 +102,35 @@ func writeForward(b *strings.Builder, from string, resolvers []forwardResolver) 
 		b.WriteString("        force_tcp\n")
 		b.WriteString("    }\n")
 		return
+	}
+	b.WriteString("\n")
+}
+
+func writeRewrites(b *strings.Builder, rules []config.RewriteRule) {
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(rule.Field)) {
+		case "name":
+			writeNameRewrite(b, rule)
+		case "type":
+			fmt.Fprintf(b, "    rewrite %s type %s %s\n", rule.EffectiveMode(), strings.ToUpper(strings.TrimSpace(rule.From)), strings.ToUpper(strings.TrimSpace(rule.To)))
+		case "ttl":
+			fmt.Fprintf(b, "    rewrite %s ttl %s %s %s\n", rule.EffectiveMode(), rule.EffectiveMatch(), strings.TrimSpace(rule.From), strings.TrimSpace(rule.To))
+		case "rcode":
+			fmt.Fprintf(b, "    rewrite %s rcode %s %s %s %s\n", rule.EffectiveMode(), rule.EffectiveMatch(), strings.TrimSpace(rule.From), strings.ToUpper(strings.TrimSpace(rule.RCodeFrom)), strings.ToUpper(strings.TrimSpace(rule.RCodeTo)))
+		}
+	}
+}
+
+func writeNameRewrite(b *strings.Builder, rule config.RewriteRule) {
+	fmt.Fprintf(b, "    rewrite %s name %s %s %s", rule.EffectiveMode(), rule.EffectiveMatch(), strings.TrimSpace(rule.From), strings.TrimSpace(rule.To))
+	switch strings.ToLower(strings.TrimSpace(rule.AnswerMode)) {
+	case "auto":
+		b.WriteString(" answer auto")
+	case "name", "value":
+		fmt.Fprintf(b, " answer %s %s %s", strings.ToLower(strings.TrimSpace(rule.AnswerMode)), strings.TrimSpace(rule.AnswerFrom), strings.TrimSpace(rule.AnswerTo))
 	}
 	b.WriteString("\n")
 }

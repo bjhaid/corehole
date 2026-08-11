@@ -14,6 +14,7 @@ import (
 	_ "github.com/coredns/coredns/plugin/forward"
 	_ "github.com/coredns/coredns/plugin/log"
 	_ "github.com/coredns/coredns/plugin/metadata"
+	_ "github.com/coredns/coredns/plugin/rewrite"
 )
 
 type Server struct {

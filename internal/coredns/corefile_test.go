@@ -175,6 +175,55 @@ func TestCorefileAddsConditionalForwardingBeforeDefaultForward(t *testing.T) {
 	}
 }
 
+func TestCorefileAddsRewriteRulesBeforeDefaultForward(t *testing.T) {
+	cfg := config.Default()
+	cfg.DNS.Rewrites = []config.RewriteRule{{
+		Enabled:    true,
+		Mode:       "stop",
+		Field:      "name",
+		Match:      "suffix",
+		From:       ".home.arpa.",
+		To:         ".lan.",
+		AnswerMode: "auto",
+	}, {
+		Enabled: true,
+		Mode:    "continue",
+		Field:   "type",
+		From:    "ANY",
+		To:      "HINFO",
+	}, {
+		Enabled:   true,
+		Mode:      "continue",
+		Field:     "rcode",
+		Match:     "regex",
+		From:      "(.*)\\.example\\.",
+		RCodeFrom: "SERVFAIL",
+		RCodeTo:   "NOERROR",
+	}, {
+		Enabled: false,
+		Field:   "name",
+		From:    "disabled.example.",
+		To:      "example.",
+	}}
+
+	got := Corefile(cfg)
+	for _, want := range []string{
+		"    rewrite stop name suffix .home.arpa. .lan. answer auto\n",
+		"    rewrite continue type ANY HINFO\n",
+		"    rewrite continue rcode regex (.*)\\.example\\. SERVFAIL NOERROR\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Corefile() = %q, want rewrite %q", got, want)
+		}
+		if strings.Index(got, want) > strings.Index(got, "    forward . 1.1.1.1:53\n") {
+			t.Fatalf("Corefile() = %q, want rewrite before forward", got)
+		}
+	}
+	if strings.Contains(got, "disabled.example") {
+		t.Fatalf("Corefile() = %q, want disabled rewrite omitted", got)
+	}
+}
+
 func TestCorefileOmitsDNSSECPluginByDefault(t *testing.T) {
 	cfg := config.Default()
 

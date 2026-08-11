@@ -14,7 +14,7 @@ import (
 	"github.com/bjhaid/corehole/internal/localdns"
 )
 
-func TestLocalDNSAPIRequiresSession(t *testing.T) {
+func TestCustomDNSAPIRequiresSession(t *testing.T) {
 	server := newTestServer(WithLocalDNSStore(newFakeLocalDNSStore()))
 
 	for _, req := range []struct {
@@ -22,11 +22,11 @@ func TestLocalDNSAPIRequiresSession(t *testing.T) {
 		path   string
 		body   any
 	}{
-		{method: http.MethodGet, path: "/api/localdns/records"},
-		{method: http.MethodPost, path: "/api/localdns/records", body: map[string]any{}},
-		{method: http.MethodGet, path: "/api/localdns/records/1"},
-		{method: http.MethodPut, path: "/api/localdns/records/1", body: map[string]any{}},
-		{method: http.MethodDelete, path: "/api/localdns/records/1"},
+		{method: http.MethodGet, path: "/api/custom-dns/records"},
+		{method: http.MethodPost, path: "/api/custom-dns/records", body: map[string]any{}},
+		{method: http.MethodGet, path: "/api/custom-dns/records/1"},
+		{method: http.MethodPut, path: "/api/custom-dns/records/1", body: map[string]any{}},
+		{method: http.MethodDelete, path: "/api/custom-dns/records/1"},
 	} {
 		res := requestJSON(t, server, req.method, req.path, req.body, nil)
 		if res.Code != http.StatusUnauthorized {
@@ -35,13 +35,13 @@ func TestLocalDNSAPIRequiresSession(t *testing.T) {
 	}
 }
 
-func TestLocalDNSAPICRUD(t *testing.T) {
+func TestCustomDNSAPICRUD(t *testing.T) {
 	store := newFakeLocalDNSStore()
 	reloader := &fakeLocalDNSReloader{}
 	server := newTestServer(WithLocalDNSStore(store), WithLocalDNSReloader(reloader))
 	cookie := setupSession(t, server)
 
-	create := requestJSON(t, server, http.MethodPost, "/api/localdns/records", map[string]any{
+	create := requestJSON(t, server, http.MethodPost, "/api/custom-dns/records", map[string]any{
 		"name":    "Host.Example.",
 		"type":    "A",
 		"value":   "192.0.2.55",
@@ -60,16 +60,16 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 		t.Fatalf("reload count after create = %d, want 1", reloader.count)
 	}
 
-	list := get(t, server, "/api/localdns/records", cookie)
+	list := get(t, server, "/api/custom-dns/records", cookie)
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status code = %d, want %d", list.Code, http.StatusOK)
 	}
-	listBody := decodeResponse[localDNSRecordsResponse](t, list)
+	listBody := decodeResponse[customDNSRecordsResponse](t, list)
 	if len(listBody.Records) != 1 || listBody.Records[0].ID != created.ID {
 		t.Fatalf("list body = %#v", listBody)
 	}
 
-	update := requestJSON(t, server, http.MethodPut, "/api/localdns/records/1", map[string]any{
+	update := requestJSON(t, server, http.MethodPut, "/api/custom-dns/records/1", map[string]any{
 		"name":    "alias.example",
 		"type":    "CNAME",
 		"value":   "host.example",
@@ -87,7 +87,7 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 		t.Fatalf("reload count after update = %d, want 2", reloader.count)
 	}
 
-	getOne := get(t, server, "/api/localdns/records/1", cookie)
+	getOne := get(t, server, "/api/custom-dns/records/1", cookie)
 	if getOne.Code != http.StatusOK {
 		t.Fatalf("get status code = %d, want %d", getOne.Code, http.StatusOK)
 	}
@@ -95,7 +95,7 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 		t.Fatalf("get record = %#v, want %#v", got, updated)
 	}
 
-	deleteRes := requestJSON(t, server, http.MethodDelete, "/api/localdns/records/1", nil, cookie)
+	deleteRes := requestJSON(t, server, http.MethodDelete, "/api/custom-dns/records/1", nil, cookie)
 	if deleteRes.Code != http.StatusNoContent {
 		t.Fatalf("delete status code = %d, want %d", deleteRes.Code, http.StatusNoContent)
 	}
@@ -103,17 +103,27 @@ func TestLocalDNSAPICRUD(t *testing.T) {
 		t.Fatalf("reload count after delete = %d, want 3", reloader.count)
 	}
 
-	missing := get(t, server, "/api/localdns/records/1", cookie)
+	missing := get(t, server, "/api/custom-dns/records/1", cookie)
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("get deleted status code = %d, want %d", missing.Code, http.StatusNotFound)
 	}
 }
 
-func TestLocalDNSAPIRejectsInvalidRecord(t *testing.T) {
+func TestCustomDNSAPIDoesNotKeepLocalDNSCompatibilityRoute(t *testing.T) {
 	server := newTestServer(WithLocalDNSStore(newFakeLocalDNSStore()))
 	cookie := setupSession(t, server)
 
-	res := requestJSON(t, server, http.MethodPost, "/api/localdns/records", map[string]any{
+	res := get(t, server, "/api/localdns/records", cookie)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("legacy route status code = %d, want %d", res.Code, http.StatusNotFound)
+	}
+}
+
+func TestCustomDNSAPIRejectsInvalidRecord(t *testing.T) {
+	server := newTestServer(WithLocalDNSStore(newFakeLocalDNSStore()))
+	cookie := setupSession(t, server)
+
+	res := requestJSON(t, server, http.MethodPost, "/api/custom-dns/records", map[string]any{
 		"name":  "host.example",
 		"type":  "A",
 		"value": "2001:db8::1",

@@ -7,6 +7,7 @@ dns:
   cache_prefetch_amount: 5
   cache_prefetch_duration: 60
   cache_prefetch_percent: 10
+  rewrites: []
   resolvers:
     - name: cloudflare
       address: "1.1.1.1:53"

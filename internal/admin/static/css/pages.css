@@ -166,6 +166,12 @@
     .localdns-panel {
       margin-bottom: 12px;
     }
+    .rewrite-form {
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+    }
+    .rewrite-form button {
+      min-width: 120px;
+    }
     .settings-grid > .settings-upstream-panel {
       grid-column: 1 / -1;
     }

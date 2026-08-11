@@ -48,6 +48,7 @@ func consoleAssetBundle(t *testing.T, server http.Handler) []byte {
 		{"/assets/js/lib/format.js", "text/javascript; charset=utf-8"},
 		{"/assets/js/pages/dashboard.js", "text/javascript; charset=utf-8"},
 		{"/assets/js/pages/queries.js", "text/javascript; charset=utf-8"},
+		{"/assets/js/pages/custom-dns.js", "text/javascript; charset=utf-8"},
 		{"/assets/js/pages/settings.js", "text/javascript; charset=utf-8"},
 	}
 
@@ -77,7 +78,7 @@ func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 		[]byte(`id="nav-blocklists" class="nav-link" href="/admin/blocklists"`),
 		[]byte(`id="nav-rules" class="nav-link" href="/admin/rules"`),
 		[]byte(`id="nav-clients-groups" class="nav-link" href="/admin/clients-groups"`),
-		[]byte(`id="nav-local-dns" class="nav-link" href="/admin/local-dns"`),
+		[]byte(`id="nav-custom-dns" class="nav-link" href="/admin/custom-dns"`),
 		[]byte(`id="nav-settings" class="nav-link" href="/admin/settings"`),
 		[]byte(`id="panel-dashboard" class="page-panel page-stack" data-page="dashboard"`),
 		[]byte("Total queries"),
@@ -98,7 +99,7 @@ func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 		[]byte(`id="panel-blocklists"`),
 		[]byte(`id="panel-rules"`),
 		[]byte(`id="panel-clients-groups"`),
-		[]byte(`id="panel-local-dns"`),
+		[]byte(`id="panel-custom-dns"`),
 		[]byte(`id="panel-settings"`),
 		[]byte("Recent queries"),
 		[]byte("Recent time buckets"),
@@ -145,7 +146,7 @@ func TestConsoleAdminRoutesServeDistinctBackendPages(t *testing.T) {
 		{"/admin/blocklists", "blocklists", "blocklists.js", []byte("Blocklists / adlists"), []byte(`id="panel-dashboard"`)},
 		{"/admin/rules", "rules", "rules.js", []byte("<h3>Rules</h3>"), []byte(`id="panel-dashboard"`)},
 		{"/admin/clients-groups", "clients-groups", "clients-groups.js", []byte("<h3>Clients</h3>"), []byte(`id="panel-dashboard"`)},
-		{"/admin/local-dns", "local-dns", "local-dns.js", []byte("Local DNS"), []byte(`id="panel-dashboard"`)},
+		{"/admin/custom-dns", "custom-dns", "custom-dns.js", []byte("Custom DNS"), []byte(`id="panel-dashboard"`)},
 		{"/admin/settings", "settings", "settings.js", []byte("Settings / API Keys"), []byte(`id="panel-dashboard"`)},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
@@ -178,7 +179,7 @@ func TestConsoleEmbeddedAssetsAvailable(t *testing.T) {
 		"static/pages/blocklists.html",
 		"static/pages/rules.html",
 		"static/pages/clients-groups.html",
-		"static/pages/local-dns.html",
+		"static/pages/custom-dns.html",
 		"static/pages/settings.html",
 		"static/templates/rows.html",
 		"static/assets/corehole-logo.svg",
@@ -203,7 +204,7 @@ func TestConsoleEmbeddedAssetsAvailable(t *testing.T) {
 		"static/js/pages/blocklists.js",
 		"static/js/pages/rules.js",
 		"static/js/pages/clients-groups.js",
-		"static/js/pages/local-dns.js",
+		"static/js/pages/custom-dns.js",
 		"static/js/pages/settings.js",
 	} {
 		t.Run(name, func(t *testing.T) {

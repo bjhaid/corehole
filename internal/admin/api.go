@@ -127,6 +127,7 @@ type ConfigSnapshot struct {
 	CachePrefetchAmount   int
 	CachePrefetchDuration int
 	CachePrefetchPercent  int
+	Rewrites              []config.RewriteRule
 	DNSSEC                DNSSECSnapshot
 	ConditionalForwarding ConditionalForwardingSnapshot
 	BlockingResponse      string
@@ -156,6 +157,7 @@ type DNSConfigUpdate struct {
 	CachePrefetchAmount   *int                         `json:"cache_prefetch_amount,omitempty"`
 	CachePrefetchDuration *int                         `json:"cache_prefetch_duration,omitempty"`
 	CachePrefetchPercent  *int                         `json:"cache_prefetch_percent,omitempty"`
+	Rewrites              *[]config.RewriteRule        `json:"rewrites,omitempty"`
 	DNSSEC                *DNSSECUpdate                `json:"dnssec,omitempty"`
 	ConditionalForwarding *ConditionalForwardingUpdate `json:"conditional_forwarding,omitempty"`
 }
@@ -293,6 +295,7 @@ type configResponse struct {
 	CachePrefetchAmount   int                           `json:"cache_prefetch_amount"`
 	CachePrefetchDuration int                           `json:"cache_prefetch_duration"`
 	CachePrefetchPercent  int                           `json:"cache_prefetch_percent"`
+	Rewrites              []config.RewriteRule          `json:"rewrites"`
 	DNSSEC                DNSSECSnapshot                `json:"dnssec"`
 	ConditionalForwarding ConditionalForwardingSnapshot `json:"conditional_forwarding"`
 	BlockingResponse      string                        `json:"blocking_response"`
@@ -662,6 +665,7 @@ func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 			CachePrefetchAmount:   defaultConfig.DNS.CachePrefetchAmount,
 			CachePrefetchDuration: defaultConfig.DNS.CachePrefetchDuration,
 			CachePrefetchPercent:  defaultConfig.DNS.CachePrefetchPercent,
+			Rewrites:              []config.RewriteRule{},
 			BlockingBundled:       defaultConfig.Blocking.Bundled,
 			Logging:               loggingSnapshotFromConfig(defaultConfig.Logging),
 			DNSSEC:                DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},
@@ -692,6 +696,7 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 		CachePrefetchAmount:   snapshot.CachePrefetchAmount,
 		CachePrefetchDuration: snapshot.CachePrefetchDuration,
 		CachePrefetchPercent:  snapshot.CachePrefetchPercent,
+		Rewrites:              cloneRewriteRules(snapshot.Rewrites),
 		DNSSEC:                snapshot.DNSSEC,
 		ConditionalForwarding: snapshot.ConditionalForwarding,
 		BlockingResponse:      snapshot.BlockingResponse,
@@ -784,6 +789,9 @@ func applyConfigUpdate(cfg config.Config, req ConfigUpdateRequest) config.Config
 		}
 		if req.DNS.CachePrefetchPercent != nil {
 			cfg.DNS.CachePrefetchPercent = *req.DNS.CachePrefetchPercent
+		}
+		if req.DNS.Rewrites != nil {
+			cfg.DNS.Rewrites = cloneRewriteRules(*req.DNS.Rewrites)
 		}
 		if req.DNS.DNSSEC != nil {
 			cfg.DNS.DNSSEC = dnssecUpdateToConfig(cfg.DNS.DNSSEC, *req.DNS.DNSSEC)
@@ -917,6 +925,7 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 		CachePrefetchAmount:   cfg.DNS.CachePrefetchAmount,
 		CachePrefetchDuration: cfg.DNS.CachePrefetchDuration,
 		CachePrefetchPercent:  cfg.DNS.CachePrefetchPercent,
+		Rewrites:              cloneRewriteRules(cfg.DNS.Rewrites),
 		DNSSEC: DNSSECSnapshot{
 			Enabled: cfg.DNS.DNSSEC.Enabled,
 			Mode:    string(cfg.DNS.DNSSEC.EffectiveMode()),
@@ -1331,6 +1340,15 @@ func cloneStrings(values []string) []string {
 		return []string{}
 	}
 	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
+}
+
+func cloneRewriteRules(values []config.RewriteRule) []config.RewriteRule {
+	if len(values) == 0 {
+		return []config.RewriteRule{}
+	}
+	cloned := make([]config.RewriteRule, len(values))
 	copy(cloned, values)
 	return cloned
 }

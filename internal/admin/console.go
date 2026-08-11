@@ -48,7 +48,7 @@ var consolePages = []consolePage{
 	{Name: "blocklists", Path: "/admin/blocklists", Title: "Blocklists", Template: "page.blocklists", Script: "blocklists.js"},
 	{Name: "rules", Path: "/admin/rules", Title: "Rules", Template: "page.rules", Script: "rules.js"},
 	{Name: "clients-groups", Path: "/admin/clients-groups", Title: "Clients / Groups", Template: "page.clients-groups", Script: "clients-groups.js"},
-	{Name: "local-dns", Path: "/admin/local-dns", Title: "Local DNS", Template: "page.local-dns", Script: "local-dns.js"},
+	{Name: "custom-dns", Path: "/admin/custom-dns", Title: "Custom DNS", Template: "page.custom-dns", Script: "custom-dns.js"},
 	{Name: "settings", Path: "/admin/settings", Title: "Settings / API Keys", Template: "page.settings", Script: "settings.js"},
 }
 

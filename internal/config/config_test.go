@@ -230,6 +230,67 @@ func TestValidateRejectsTooSmallCacheCapacity(t *testing.T) {
 	}
 }
 
+func TestValidateRewriteRules(t *testing.T) {
+	cfg := Default()
+	cfg.DNS.Rewrites = []RewriteRule{{
+		Enabled:    true,
+		Mode:       "stop",
+		Field:      "name",
+		Match:      "regex",
+		From:       "(.*)\\.home\\.arpa\\.",
+		To:         "{1}.lan.",
+		AnswerMode: "auto",
+	}, {
+		Enabled: true,
+		Mode:    "continue",
+		Field:   "type",
+		From:    "ANY",
+		To:      "HINFO",
+	}, {
+		Enabled: true,
+		Mode:    "continue",
+		Field:   "ttl",
+		Match:   "suffix",
+		From:    ".example.",
+		To:      "30-300",
+	}, {
+		Enabled:   true,
+		Mode:      "continue",
+		Field:     "rcode",
+		Match:     "suffix",
+		From:      ".example.",
+		RCodeFrom: "SERVFAIL",
+		RCodeTo:   "NOERROR",
+	}}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsInvalidRewriteRules(t *testing.T) {
+	tests := []struct {
+		name string
+		rule RewriteRule
+	}{
+		{name: "unsupported field", rule: RewriteRule{Enabled: true, Field: "edns0", From: "x", To: "y"}},
+		{name: "bad regex", rule: RewriteRule{Enabled: true, Field: "name", Match: "regex", From: "(", To: "example."}},
+		{name: "bad type", rule: RewriteRule{Enabled: true, Field: "type", From: "BOGUS", To: "A"}},
+		{name: "bad ttl", rule: RewriteRule{Enabled: true, Field: "ttl", Match: "exact", From: "example.", To: "300-30"}},
+		{name: "bad rcode", rule: RewriteRule{Enabled: true, Field: "rcode", Match: "exact", From: "example.", RCodeFrom: "BOGUS", RCodeTo: "NOERROR"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.DNS.Rewrites = []RewriteRule{tt.rule}
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want rewrite validation error")
+			}
+		})
+	}
+}
+
 func TestValidateRejectsUnsupportedLoggingConfig(t *testing.T) {
 	cfg := Default()
 	cfg.Logging.Level = "trace"

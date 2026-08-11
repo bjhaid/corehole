@@ -10,7 +10,7 @@ starts both:
 
 - a DNS service backed by [CoreDNS](https://coredns.io/)
 - a browsable web admin dashboard for setup, login/logout, status, blocklists,
-  query logs, analytics, clients/groups, local DNS, settings, and API keys
+  query logs, analytics, clients/groups, custom DNS, settings, and API keys
 
 The DNS service loads a small bundled seed blocklist, configured local
 blocklists, and subscribed lists managed from SQLite. It blocks matching
@@ -81,7 +81,7 @@ admin password. Admin users and API keys are persisted in the configured
 SQLite database and survive restarts as long as `storage.path` points at the
 same database. Browser sessions are stored in SQLite and survive restarts until
 they expire or are explicitly logged out. After login, use the web console to
-manage blocklists, upstream resolvers, DNSSEC assistance, local DNS,
+manage blocklists, upstream resolvers, DNSSEC assistance, custom DNS,
 clients/groups, analytics, settings, and API keys.
 
 ## Runtime Dependencies
@@ -272,7 +272,7 @@ accepted.
 1. Start corehole with `corehole serve`.
 2. Open the admin console and create the first admin password for this database.
 3. Point a client or test command at the configured DNS listener.
-4. Manage blocklists, upstream resolvers, DNSSEC assistance, local DNS, clients,
+4. Manage blocklists, upstream resolvers, DNSSEC assistance, custom DNS, clients,
    groups, and API keys from the admin console. Runtime-managed DNS settings and
    blocklists take effect without a restart when the DNS listener address is
    unchanged; listener changes still require a restart.

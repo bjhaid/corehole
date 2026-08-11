@@ -794,7 +794,16 @@ func TestConfigPayload(t *testing.T) {
 		CachePrefetchAmount:   5,
 		CachePrefetchDuration: 60,
 		CachePrefetchPercent:  10,
-		DNSSEC:                DNSSECSnapshot{Enabled: true, Mode: "upstream"},
+		Rewrites: []config.RewriteRule{{
+			Enabled:    true,
+			Mode:       "stop",
+			Field:      "name",
+			Match:      "suffix",
+			From:       ".home.arpa.",
+			To:         ".lan.",
+			AnswerMode: "auto",
+		}},
+		DNSSEC: DNSSECSnapshot{Enabled: true, Mode: "upstream"},
 		ConditionalForwarding: ConditionalForwardingSnapshot{
 			Enabled:  true,
 			Domain:   "lan",
@@ -830,6 +839,8 @@ func TestConfigPayload(t *testing.T) {
 		body.CachePrefetchAmount != 5 ||
 		body.CachePrefetchDuration != 60 ||
 		body.CachePrefetchPercent != 10 ||
+		len(body.Rewrites) != 1 ||
+		body.Rewrites[0].From != ".home.arpa." ||
 		!body.DNSSEC.Enabled ||
 		body.DNSSEC.Mode != "upstream" ||
 		!body.ConditionalForwarding.Enabled ||
@@ -992,6 +1003,15 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 			"cache_prefetch_amount":   7,
 			"cache_prefetch_duration": 90,
 			"cache_prefetch_percent":  20,
+			"rewrites": []map[string]any{{
+				"enabled":     true,
+				"mode":        "stop",
+				"field":       "name",
+				"match":       "suffix",
+				"from":        ".home.arpa.",
+				"to":          ".lan.",
+				"answer_mode": "auto",
+			}},
 			"dnssec": map[string]any{
 				"enabled": true,
 				"mode":    "upstream",
@@ -1038,6 +1058,8 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 		body.Config.CachePrefetchAmount != 7 ||
 		body.Config.CachePrefetchDuration != 90 ||
 		body.Config.CachePrefetchPercent != 20 ||
+		len(body.Config.Rewrites) != 1 ||
+		body.Config.Rewrites[0].To != ".lan." ||
 		!body.Config.DNSSEC.Enabled ||
 		body.Config.DNSSEC.Mode != "upstream" ||
 		!body.Config.ConditionalForwarding.Enabled ||
@@ -1073,6 +1095,8 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 		store.cfg.DNS.CachePrefetchAmount != 7 ||
 		store.cfg.DNS.CachePrefetchDuration != 90 ||
 		store.cfg.DNS.CachePrefetchPercent != 20 ||
+		len(store.cfg.DNS.Rewrites) != 1 ||
+		store.cfg.DNS.Rewrites[0].AnswerMode != "auto" ||
 		!store.cfg.DNS.ConditionalForwarding.Enabled {
 		t.Fatalf("stored dns config = %#v, want cache TTL and conditional forwarding", store.cfg.DNS)
 	}

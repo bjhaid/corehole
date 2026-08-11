@@ -379,6 +379,7 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 		CachePrefetchAmount:   cfg.DNS.CachePrefetchAmount,
 		CachePrefetchDuration: cfg.DNS.CachePrefetchDuration,
 		CachePrefetchPercent:  cfg.DNS.CachePrefetchPercent,
+		Rewrites:              append([]config.RewriteRule(nil), cfg.DNS.Rewrites...),
 		BlockingResponse:      string(cfg.Blocking.Response),
 		BlockingBundled:       cfg.Blocking.Bundled,
 		BlockingPaused:        cfg.Blocking.Paused,

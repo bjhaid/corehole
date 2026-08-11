@@ -33,6 +33,19 @@ config source and active blocklist count.
 | `dns.cache_prefetch_amount` | integer hits | `5` | `0` or greater | Enables CoreDNS cache prefetch for popular entries once this many queries are seen without gaps longer than `cache_prefetch_duration`. Set to `0` to disable prefetch. |
 | `dns.cache_prefetch_duration` | integer seconds | `60` | `0` or greater | Popularity window for CoreDNS cache prefetch. |
 | `dns.cache_prefetch_percent` | integer percent | `10` | `0` to `100` | Remaining-TTL threshold that triggers CoreDNS prefetch for popular entries. |
+| `dns.rewrites` | list of rewrite rule objects | empty list | Valid rewrite rules | CoreDNS `rewrite` rules managed from the Custom DNS page. Corehole currently exposes name, type, TTL, and RCODE rewrites. EDNS0 and CNAME rewrites are intentionally not exposed yet. |
+| `dns.rewrites[].enabled` | boolean | `false` for newly-created YAML objects | `true` or `false` | Disabled rules are stored but omitted from the generated CoreDNS Corefile. |
+| `dns.rewrites[].mode` | string | `"stop"` | `"stop"`, `"continue"`, or empty | Controls whether CoreDNS stops after a matching rewrite or continues evaluating later rewrite rules. |
+| `dns.rewrites[].field` | string | none | `"name"`, `"type"`, `"ttl"`, or `"rcode"` | Selects what the CoreDNS rewrite rule changes. |
+| `dns.rewrites[].match` | string | `"exact"` | `"exact"`, `"prefix"`, `"suffix"`, `"substring"`, `"regex"`, or empty | Match type for name, TTL, and RCODE rewrites. Type rewrites ignore this field. Regex patterns must compile and be 10000 characters or fewer. |
+| `dns.rewrites[].from` | string | none | Required for enabled rules | Query name/type value to match, depending on `field`. Values must be a single Corefile token. |
+| `dns.rewrites[].to` | string | none | Required for name, type, and TTL rewrites | Rewrite target. For TTL rewrites this is seconds such as `"30"` or a range such as `"30-300"`, `"-30"`, or `"30-"`. |
+| `dns.rewrites[].rcode_from` | string | none | Supported DNS RCODE name or number | Source response code for RCODE rewrites, such as `"SERVFAIL"`. |
+| `dns.rewrites[].rcode_to` | string | none | Supported DNS RCODE name or number | Target response code for RCODE rewrites, such as `"NOERROR"`. |
+| `dns.rewrites[].answer_mode` | string | `"none"` | `"none"`, `"auto"`, `"name"`, or `"value"` | Optional CoreDNS answer rewrite behavior for name rewrites. `auto` asks CoreDNS to rewrite answers best-effort so clients see names matching the original question. |
+| `dns.rewrites[].answer_from` | string | none | Required when `answer_mode` is `"name"` or `"value"` | Regex source for explicit answer rewrites. |
+| `dns.rewrites[].answer_to` | string | none | Required when `answer_mode` is `"name"` or `"value"` | Replacement target for explicit answer rewrites. |
+| `dns.rewrites[].comment` | string | empty | Any string | Human-readable note shown in the admin console. |
 | `dns.dnssec.enabled` | boolean | `false` | `true` or `false` | Enables DNSSEC upstream assistance when paired with `mode: upstream`. When disabled, use `mode: off`. |
 | `dns.dnssec.mode` | string | `"off"` | `"off"`, `"upstream"`, or empty when `enabled: true` | `off` disables DNSSEC assistance. `upstream` sends DNSSEC request flags upstream and preserves validated upstream AD status for clients that request it. Empty mode with `enabled: true` is treated as `upstream`. `local` is not implemented and is rejected. |
 | `dns.conditional_forwarding.enabled` | boolean | `false` | `true` or `false` | Enables one local-domain/reverse-zone conditional forwarding rule before the default `forward .` rule. |
@@ -84,6 +97,8 @@ Fields read at startup by the running application:
 - `dns.cache_success_ttl`, `dns.cache_denial_ttl`, capacities, and prefetch
   fields: used inside the generated CoreDNS `cache` block; restart required
   after YAML changes.
+- `dns.rewrites`: used to build CoreDNS `rewrite` directives before default
+  forwarding; restart required after YAML changes.
 - `dns.dnssec`: used to add corehole's upstream DNSSEC helper before CoreDNS
   forwarding; restart required after YAML changes.
 - `dns.conditional_forwarding`: used to build a conditional CoreDNS `forward`
@@ -124,6 +139,7 @@ table:
 - `dns.cache_prefetch_amount`
 - `dns.cache_prefetch_duration`
 - `dns.cache_prefetch_percent`
+- `dns.rewrites`
 - `dns.dnssec`
 - `dns.conditional_forwarding`
 - `admin.listen`
@@ -167,6 +183,9 @@ Startup validation fails when:
   while cache is enabled.
 - cache prefetch fields are negative, or `dns.cache_prefetch_percent` is
   greater than `100`.
+- an enabled rewrite rule has an unsupported field/mode/match, missing
+  required values, an invalid DNS record type, invalid TTL rewrite target,
+  invalid RCODE, or an invalid/overlong regex.
 - `logging.level` is unsupported.
 - `dns.dnssec.enabled` is true without `mode: upstream`.
 - `dns.dnssec.mode` is `upstream` while `enabled` is false.
@@ -218,6 +237,7 @@ dns:
   cache_prefetch_amount: 5
   cache_prefetch_duration: 60
   cache_prefetch_percent: 10
+  rewrites: []
   dnssec:
     enabled: false
     mode: off
@@ -272,6 +292,15 @@ dns:
   cache_prefetch_amount: 5
   cache_prefetch_duration: 60
   cache_prefetch_percent: 10
+  rewrites:
+    - enabled: true
+      mode: stop
+      field: name
+      match: suffix
+      from: ".home.arpa."
+      to: ".lan."
+      answer_mode: auto
+      comment: "Map home.arpa names to the LAN resolver namespace"
   dnssec:
     enabled: true
     mode: upstream
