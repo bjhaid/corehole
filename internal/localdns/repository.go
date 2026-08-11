@@ -89,7 +89,7 @@ ORDER BY name ASC, type ASC, value ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list local dns records: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []Record
 	for rows.Next() {

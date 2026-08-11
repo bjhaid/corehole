@@ -234,7 +234,7 @@ func (s *Service) importListEntries(ctx context.Context, list List) ([]ListEntry
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	parser := s.parser
 	if parser == nil {
@@ -290,7 +290,7 @@ func (s *Service) openListSource(ctx context.Context, list List) (io.ReadCloser,
 			return nil, "", fmt.Errorf("fetch filter list %s: %w", list.URL, err)
 		}
 		if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
-			res.Body.Close()
+			_ = res.Body.Close()
 			return nil, "", fmt.Errorf("fetch filter list %s: status %d", list.URL, res.StatusCode)
 		}
 		return res.Body, list.URL, nil

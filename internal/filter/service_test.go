@@ -19,7 +19,9 @@ func TestRefreshURLListImportsEntriesAndRuntimeBlocks(t *testing.T) {
 	defer closeStore()
 	service := NewService(repo)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0.0.0.0 adzerk.com\nplain.example\n*.suffix.example\n"))
+		if _, err := w.Write([]byte("0.0.0.0 adzerk.com\nplain.example\n*.suffix.example\n")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 

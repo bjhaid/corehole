@@ -357,7 +357,7 @@ type passwordRequest struct {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {

@@ -202,9 +202,10 @@ goreleaser release --clean
 
 The release build injects the tag into `corehole version`.
 
-GitHub Actions runs `go test ./...` and admin JavaScript syntax checks on
-pushes and pull requests. Pushing a `v*` tag, for example `v0.1.0`, runs
-GoReleaser and publishes the release artifacts to GitHub Releases.
+GitHub Actions runs `golangci-lint`, `go test ./...`, and admin JavaScript
+syntax checks on pushes and pull requests. Pushing a `v*` tag, for example
+`v0.1.0`, runs lint, tests, GoReleaser, and publishes the release artifacts to
+GitHub Releases.
 
 ## Admin API
 
@@ -279,6 +280,7 @@ accepted.
 
 ```sh
 go test ./...
+golangci-lint run
 go build ./cmd/corehole
 go run ./cmd/corehole serve
 ```

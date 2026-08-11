@@ -24,8 +24,8 @@ func run(args []string) error {
 	case "serve":
 		return app.Serve(context.Background(), args[1:])
 	case "version":
-		fmt.Fprintln(os.Stdout, app.Version())
-		return nil
+		_, err := fmt.Fprintln(os.Stdout, app.Version())
+		return err
 	default:
 		return app.PrintUsage(os.Stdout)
 	}

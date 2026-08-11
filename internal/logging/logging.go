@@ -134,7 +134,7 @@ func write(level Level, levelName string, msg string, attrs ...any) {
 		writeJSON(strings.ToLower(levelName), msg, attrs...)
 		return
 	}
-	log.Output(3, fmt.Sprintf("[%s] %s%s", levelName, msg, formatTextAttrs(attrs...)))
+	_ = log.Output(3, fmt.Sprintf("[%s] %s%s", levelName, msg, formatTextAttrs(attrs...)))
 }
 
 func writeJSON(level string, msg string, attrs ...any) {
@@ -148,10 +148,10 @@ func writeJSON(level string, msg string, attrs ...any) {
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
-		log.Output(3, fmt.Sprintf("[ERROR] logging_encode_failed error=%q msg=%q", err.Error(), msg))
+		_ = log.Output(3, fmt.Sprintf("[ERROR] logging_encode_failed error=%q msg=%q", err.Error(), msg))
 		return
 	}
-	fmt.Fprintln(outputWriter(), string(data))
+	_, _ = fmt.Fprintln(outputWriter(), string(data))
 }
 
 type stdJSONWriter struct{}

@@ -1207,9 +1207,7 @@ func parseQueryType(raw string) (uint16, bool) {
 	if value, ok := qtypeNames[raw]; ok {
 		return value, true
 	}
-	if strings.HasPrefix(raw, "TYPE") {
-		raw = strings.TrimPrefix(raw, "TYPE")
-	}
+	raw = strings.TrimPrefix(raw, "TYPE")
 	value, err := strconv.ParseUint(raw, 10, 16)
 	if err != nil {
 		return 0, false

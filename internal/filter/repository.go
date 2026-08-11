@@ -44,7 +44,7 @@ ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list filter lists: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var lists []List
 	for rows.Next() {
@@ -131,7 +131,7 @@ ORDER BY id`, listID)
 	if err != nil {
 		return nil, fmt.Errorf("list filter list entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []ListEntry
 	for rows.Next() {
@@ -206,7 +206,7 @@ func (r *Repository) ReplaceListEntries(ctx context.Context, listID int64, entri
 	if err != nil {
 		return List{}, fmt.Errorf("begin filter list refresh: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, "DELETE FROM filter_list_entries WHERE list_id = ?", listID); err != nil {
 		return List{}, fmt.Errorf("clear filter list entries: %w", err)
@@ -217,7 +217,7 @@ VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return List{}, fmt.Errorf("prepare filter list entry replace: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return List{}, err
@@ -273,7 +273,7 @@ ORDER BY l.id, e.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list runtime filter blocklist entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []blocklist.Entry
 	for rows.Next() {
@@ -343,7 +343,7 @@ ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list filter rules: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var rules []Rule
 	for rows.Next() {
@@ -429,7 +429,7 @@ ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list filter clients: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var clients []Client
 	for rows.Next() {
@@ -515,7 +515,7 @@ ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list filter groups: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var groups []Group
 	for rows.Next() {
@@ -647,7 +647,7 @@ ORDER BY g.id`, table, ownerColumn), ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("list filter group mappings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var groups []Group
 	for rows.Next() {
@@ -674,7 +674,7 @@ WHERE c.address = ? AND c.enabled = 1 AND g.enabled = 1`, address)
 	if err != nil {
 		return nil, fmt.Errorf("list client filter groups: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id int64
@@ -698,7 +698,7 @@ ORDER BY r.id, rg.group_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list decision filter rules: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var rules []scopedRule
 	for rows.Next() {
@@ -730,7 +730,7 @@ ORDER BY l.id, e.id, lg.group_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list decision filter list entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []scopedListEntry
 	for rows.Next() {
