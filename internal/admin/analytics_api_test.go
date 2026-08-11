@@ -47,6 +47,7 @@ func TestAnalyticsSummarySuccessAppliesPrivacy(t *testing.T) {
 		summary: audit.Summary{
 			TotalQueryCount:   20,
 			TotalsByAction:    []audit.ActionTotal{{Action: "block", Count: 3}, {Action: "allow", Count: 1}},
+			TotalsByCache:     []audit.NamedTotal{{Name: "hit", Count: 10}, {Name: "miss", Count: 7}, {Name: "bypass", Count: 3}},
 			TopQueriedDomains: []audit.NamedTotal{{Name: "ads.example.", Count: 3}, {Name: "example.com.", Count: 1}},
 			TopBlockedDomains: []audit.NamedTotal{{Name: "ads.example.", Count: 3}},
 			TopClients:        []audit.NamedTotal{{Name: "192.0.2.10", Count: 4}},
@@ -83,6 +84,12 @@ func TestAnalyticsSummarySuccessAppliesPrivacy(t *testing.T) {
 	}
 	if body.TotalQueryCount != 20 {
 		t.Fatalf("total_query_count = %d, want 20", body.TotalQueryCount)
+	}
+	if len(body.TotalsByCache) != 3 ||
+		body.TotalsByCache[0] != (cacheTotalResponse{Status: "hit", Count: 10}) ||
+		body.TotalsByCache[1] != (cacheTotalResponse{Status: "miss", Count: 7}) ||
+		body.TotalsByCache[2] != (cacheTotalResponse{Status: "bypass", Count: 3}) {
+		t.Fatalf("totals by cache = %#v", body.TotalsByCache)
 	}
 	if len(body.TopQueriedDomains) != 1 || body.TopQueriedDomains[0].Domain != "" || body.TopQueriedDomains[0].Count != 4 {
 		t.Fatalf("top queried domains = %#v, want collapsed hidden domain", body.TopQueriedDomains)

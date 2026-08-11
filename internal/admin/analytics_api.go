@@ -29,6 +29,7 @@ type analyticsSummaryResponse struct {
 	PrivacyLevel      int                    `json:"privacy_level"`
 	TotalQueryCount   int64                  `json:"total_query_count"`
 	TotalsByAction    []actionTotalResponse  `json:"totals_by_action"`
+	TotalsByCache     []cacheTotalResponse   `json:"totals_by_cache"`
 	TopQueriedDomains []domainTotalResponse  `json:"top_queried_domains"`
 	TopBlockedDomains []domainTotalResponse  `json:"top_blocked_domains"`
 	TopClients        []clientTotalResponse  `json:"top_clients"`
@@ -39,6 +40,11 @@ type analyticsSummaryResponse struct {
 
 type actionTotalResponse struct {
 	Action string `json:"action"`
+	Count  int    `json:"count"`
+}
+
+type cacheTotalResponse struct {
+	Status string `json:"status"`
 	Count  int    `json:"count"`
 }
 
@@ -237,6 +243,7 @@ func analyticsSummaryResponseFromAudit(summary audit.Summary, level audit.Privac
 		PrivacyLevel:      int(level),
 		TotalQueryCount:   summary.TotalQueryCount,
 		TotalsByAction:    actionTotalResponses(summary.TotalsByAction),
+		TotalsByCache:     cacheTotalResponses(summary.TotalsByCache),
 		TopQueriedDomains: domainTotalResponses(summary.TopQueriedDomains),
 		TopBlockedDomains: domainTotalResponses(summary.TopBlockedDomains),
 		TopClients:        clientTotalResponses(summary.TopClients),
@@ -266,6 +273,17 @@ func actionTotalResponses(totals []audit.ActionTotal) []actionTotalResponse {
 		})
 	}
 	return responses
+}
+
+func cacheTotalResponses(totals []audit.NamedTotal) []cacheTotalResponse {
+	if len(totals) == 0 {
+		return []cacheTotalResponse{}
+	}
+	res := make([]cacheTotalResponse, 0, len(totals))
+	for _, total := range totals {
+		res = append(res, cacheTotalResponse{Status: total.Name, Count: total.Count})
+	}
+	return res
 }
 
 func domainTotalResponses(totals []audit.NamedTotal) []domainTotalResponse {

@@ -542,36 +542,40 @@ func TestQuerySummaryAggregatesAuditEvents(t *testing.T) {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	events := []Event{
 		{
-			Timestamp: time.Date(2026, 8, 10, 11, 10, 0, 0, time.UTC),
-			ClientIP:  netip.MustParseAddr("192.0.2.10"),
-			QueryName: "example.com.",
-			QueryType: 1,
-			Action:    coredns.ActionAllow,
-			Duration:  5 * time.Millisecond,
+			Timestamp:   time.Date(2026, 8, 10, 11, 10, 0, 0, time.UTC),
+			ClientIP:    netip.MustParseAddr("192.0.2.10"),
+			QueryName:   "example.com.",
+			QueryType:   1,
+			Action:      coredns.ActionAllow,
+			Duration:    5 * time.Millisecond,
+			CacheStatus: "miss",
 		},
 		{
-			Timestamp: time.Date(2026, 8, 10, 11, 20, 0, 0, time.UTC),
-			ClientIP:  netip.MustParseAddr("192.0.2.10"),
-			QueryName: "ads.example.",
-			QueryType: 1,
-			Action:    coredns.ActionBlock,
-			Reason:    "deny",
+			Timestamp:   time.Date(2026, 8, 10, 11, 20, 0, 0, time.UTC),
+			ClientIP:    netip.MustParseAddr("192.0.2.10"),
+			QueryName:   "ads.example.",
+			QueryType:   1,
+			Action:      coredns.ActionBlock,
+			Reason:      "deny",
+			CacheStatus: "bypass",
 		},
 		{
-			Timestamp: time.Date(2026, 8, 10, 12, 10, 0, 0, time.UTC),
-			ClientIP:  netip.MustParseAddr("192.0.2.20"),
-			QueryName: "ads.example.",
-			QueryType: 1,
-			Action:    coredns.ActionBlock,
-			Reason:    "deny",
+			Timestamp:   time.Date(2026, 8, 10, 12, 10, 0, 0, time.UTC),
+			ClientIP:    netip.MustParseAddr("192.0.2.20"),
+			QueryName:   "ads.example.",
+			QueryType:   1,
+			Action:      coredns.ActionBlock,
+			Reason:      "deny",
+			CacheStatus: "bypass",
 		},
 		{
-			Timestamp: time.Date(2026, 8, 10, 12, 20, 0, 0, time.UTC),
-			ClientIP:  netip.MustParseAddr("192.0.2.20"),
-			QueryName: "bad.example.",
-			QueryType: 1,
-			Action:    coredns.ActionBlock,
-			Reason:    "deny",
+			Timestamp:   time.Date(2026, 8, 10, 12, 20, 0, 0, time.UTC),
+			ClientIP:    netip.MustParseAddr("192.0.2.20"),
+			QueryName:   "bad.example.",
+			QueryType:   1,
+			Action:      coredns.ActionBlock,
+			Reason:      "deny",
+			CacheStatus: "hit",
 		},
 	}
 	if err := insertBatch(ctx, store.DB(), events); err != nil {
@@ -596,6 +600,12 @@ func TestQuerySummaryAggregatesAuditEvents(t *testing.T) {
 	}
 	if summary.TotalQueryCount != 4 {
 		t.Fatalf("total query count = %d, want 4", summary.TotalQueryCount)
+	}
+	if len(summary.TotalsByCache) != 3 ||
+		summary.TotalsByCache[0] != (NamedTotal{Name: "bypass", Count: 2}) ||
+		summary.TotalsByCache[1] != (NamedTotal{Name: "hit", Count: 1}) ||
+		summary.TotalsByCache[2] != (NamedTotal{Name: "miss", Count: 1}) {
+		t.Fatalf("totals by cache = %#v", summary.TotalsByCache)
 	}
 	if len(summary.TopQueriedDomains) != 2 ||
 		summary.TopQueriedDomains[0] != (NamedTotal{Name: "ads.example.", Count: 2}) {

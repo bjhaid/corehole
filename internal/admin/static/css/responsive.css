@@ -2,6 +2,9 @@
       .analytics-grid {
         grid-template-columns: 1fr;
       }
+      .cache-chart {
+        grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+      }
     }
     @media (max-width: 860px) {
       .auth-grid,
@@ -82,6 +85,12 @@
       }
       .analytics-settings-actions button {
         width: 100%;
+      }
+      .cache-chart {
+        grid-template-columns: 1fr;
+      }
+      .cache-pie {
+        max-width: 180px;
       }
       .rule-form-grid,
       .client-form-grid,

@@ -142,7 +142,7 @@ func TestConsoleAdminRoutesServeDistinctBackendPages(t *testing.T) {
 	}{
 		{"/admin/dashboard", "dashboard", "dashboard.js", []byte("All-time DNS requests"), []byte(`id="panel-query-log"`)},
 		{"/admin/queries", "queries", "queries.js", []byte("Recent query log"), []byte(`id="panel-dashboard"`)},
-		{"/admin/analytics", "analytics", "analytics.js", []byte("Analytics / Privacy"), []byte(`id="panel-dashboard"`)},
+		{"/admin/analytics", "analytics", "analytics.js", []byte(`id="analytics-cache-chart"`), []byte(`id="panel-dashboard"`)},
 		{"/admin/blocklists", "blocklists", "blocklists.js", []byte("Blocklists / adlists"), []byte(`id="panel-dashboard"`)},
 		{"/admin/rules", "rules", "rules.js", []byte("<h3>Rules</h3>"), []byte(`id="panel-dashboard"`)},
 		{"/admin/clients-groups", "clients-groups", "clients-groups.js", []byte("<h3>Clients</h3>"), []byte(`id="panel-dashboard"`)},

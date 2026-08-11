@@ -37,6 +37,7 @@ type SummaryOptions struct {
 type Summary struct {
 	TotalQueryCount   int64
 	TotalsByAction    []ActionTotal
+	TotalsByCache     []NamedTotal
 	TopQueriedDomains []NamedTotal
 	TopBlockedDomains []NamedTotal
 	TopClients        []NamedTotal
@@ -291,6 +292,10 @@ func QuerySummary(ctx context.Context, db *sql.DB, opts SummaryOptions) (Summary
 	if err != nil {
 		return Summary{}, err
 	}
+	cacheTotals, err := cacheStatusTotals(ctx, db, opts.Since)
+	if err != nil {
+		return Summary{}, err
+	}
 	topQueries, err := namedTotals(ctx, db, `
 SELECT query_name, COUNT(*)
 FROM audit_events
@@ -343,6 +348,7 @@ LIMIT ?`, opts.Since, opts.TopLimit)
 	return Summary{
 		TotalQueryCount:   allTimeTotals.TotalQueries,
 		TotalsByAction:    totals,
+		TotalsByCache:     cacheTotals,
 		TopQueriedDomains: topQueries,
 		TopBlockedDomains: topBlocked,
 		TopClients:        topClients,
@@ -435,6 +441,7 @@ func ProjectSummary(summary Summary, level PrivacyLevel) Summary {
 	projected := Summary{
 		TotalQueryCount:   summary.TotalQueryCount,
 		TotalsByAction:    cloneActionTotals(summary.TotalsByAction),
+		TotalsByCache:     cloneNamedTotals(summary.TotalsByCache),
 		TopQueriedDomains: cloneNamedTotals(summary.TopQueriedDomains),
 		TopBlockedDomains: cloneNamedTotals(summary.TopBlockedDomains),
 		TopClients:        cloneNamedTotals(summary.TopClients),
@@ -508,6 +515,34 @@ ORDER BY COUNT(*) DESC, action ASC`, since.Format(time.RFC3339Nano))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read action totals: %w", err)
+	}
+	return totals, nil
+}
+
+func cacheStatusTotals(ctx context.Context, db *sql.DB, since time.Time) ([]NamedTotal, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT cache_status, COUNT(*)
+FROM audit_events
+WHERE timestamp >= ? AND cache_status <> ''
+GROUP BY cache_status
+ORDER BY COUNT(*) DESC, cache_status ASC`, since.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, fmt.Errorf("query cache status totals: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var totals []NamedTotal
+	for rows.Next() {
+		var total NamedTotal
+		if err := rows.Scan(&total.Name, &total.Count); err != nil {
+			return nil, fmt.Errorf("scan cache status total: %w", err)
+		}
+		totals = append(totals, total)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read cache status totals: %w", err)
 	}
 	return totals, nil
 }

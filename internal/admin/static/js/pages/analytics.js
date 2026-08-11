@@ -6,6 +6,14 @@ import {analyticsCount, analyticsTotalQueryCount, countValue, normalizeAnalytics
 import {displayNumber, displayValue, firstDefined, formatTime, pick} from "../lib/format.js";
 
 const clientSeriesColors = ["#276ef1", "#179c5f", "#d64545", "#8a63d2", "#d08b13", "#0f8a9d"];
+const cacheStatusColors = Object.freeze({
+  hit: "#179c5f",
+  miss: "#d08b13",
+  bypass: "#8a63d2",
+  disabled: "#6b7785",
+  unknown: "#d64545",
+  other: "#0f8a9d"
+});
 const retentionUnits = Object.freeze({
   seconds: 1,
   minutes: 60,
@@ -32,6 +40,10 @@ function fields() {
     bucketsTitle: required("#analytics-buckets-title"),
     bucketsChartBody: required("#analytics-buckets-chart-body"),
     bucketsTooltip: required("#analytics-buckets-tooltip"),
+    cacheCount: required("#analytics-cache-count"),
+    cacheChart: required("#analytics-cache-chart"),
+    cachePie: required("#analytics-cache-pie"),
+    cacheLegend: required("#analytics-cache-legend"),
     queriedCount: required("#analytics-queried-count"),
     queriedBody: required("#analytics-queried-body"),
     blockedCount: required("#analytics-blocked-count"),
@@ -162,6 +174,91 @@ function analyticsNumber(value) {
     return Math.max(0, Number(value));
   }
   return 0;
+}
+
+function cacheStatusLabel(status) {
+  switch (status) {
+  case "hit":
+    return "Cache hit";
+  case "miss":
+    return "Cache miss";
+  case "bypass":
+    return "Bypass";
+  case "disabled":
+    return "Disabled";
+  case "unknown":
+    return "Unknown";
+  default:
+    return "Other";
+  }
+}
+
+function cacheStatusRows(value) {
+  const rows = normalizeAnalyticsItems(value, "status");
+  const totals = new Map();
+  for (const row of rows) {
+    const rawStatus = String(firstDefined(row, ["status", "cache_status", "cacheStatus", "name"]) || "other").trim().toLowerCase();
+    const status = Object.prototype.hasOwnProperty.call(cacheStatusColors, rawStatus) ? rawStatus : "other";
+    const count = analyticsCount(row);
+    if (count <= 0) {
+      continue;
+    }
+    totals.set(status, (totals.get(status) || 0) + count);
+  }
+  return ["hit", "miss", "bypass", "disabled", "unknown", "other"]
+    .map(status => ({status, count: totals.get(status) || 0, color: cacheStatusColors[status]}))
+    .filter(row => row.count > 0);
+}
+
+function renderCacheChart(target, rawValue) {
+  target.cacheLegend.textContent = "";
+  target.cachePie.style.background = "var(--line)";
+  target.cacheCount.textContent = "";
+  if (rawValue === undefined) {
+    target.cacheChart.setAttribute("aria-label", "Cache outcomes unavailable.");
+    const empty = document.createElement("p");
+    empty.className = "cache-empty";
+    empty.textContent = "Cache outcomes are not reported by this backend yet.";
+    target.cacheLegend.appendChild(empty);
+    return;
+  }
+
+  const rows = cacheStatusRows(rawValue);
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  if (total <= 0) {
+    target.cacheChart.setAttribute("aria-label", "No cache outcome data reported for this period.");
+    const empty = document.createElement("p");
+    empty.className = "cache-empty";
+    empty.textContent = "No cache outcome data in this period yet.";
+    target.cacheLegend.appendChild(empty);
+    return;
+  }
+
+  let cursor = 0;
+  const segments = rows.map(row => {
+    const start = cursor;
+    cursor += (row.count / total) * 100;
+    return row.color + " " + start.toFixed(2) + "% " + cursor.toFixed(2) + "%";
+  });
+  target.cachePie.style.background = "conic-gradient(" + segments.join(", ") + ")";
+  target.cacheCount.textContent = displayNumber(total) + " queries";
+  target.cacheChart.setAttribute("aria-label", "Cache outcomes. " + rows.map(row => cacheStatusLabel(row.status) + ": " + displayNumber(row.count)).join(", ") + ".");
+
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "cache-legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "cache-legend-swatch";
+    swatch.style.background = row.color;
+    const name = document.createElement("span");
+    name.className = "cache-legend-name";
+    name.textContent = cacheStatusLabel(row.status);
+    const value = document.createElement("span");
+    value.className = "cache-legend-value";
+    value.textContent = displayNumber(row.count) + " (" + formatPercent((row.count / total) * 100) + ")";
+    item.append(swatch, name, value);
+    target.cacheLegend.appendChild(item);
+  }
 }
 
 function bucketCount(bucket, paths) {
@@ -514,12 +611,21 @@ function renderUnavailable(target, error) {
   target.bucketsChart.setAttribute("aria-label", "Query activity is unavailable.");
   target.bucketsChartBody.className = "bucket-empty";
   target.bucketsChartBody.textContent = "Query activity is unavailable.";
+  target.cachePie.style.background = "var(--line)";
+  target.cacheLegend.textContent = "";
+  {
+    const empty = document.createElement("p");
+    empty.className = "cache-empty";
+    empty.textContent = "Cache outcomes are unavailable.";
+    target.cacheLegend.appendChild(empty);
+  }
   target.queriedBody.textContent = "";
   target.blockedBody.textContent = "";
   target.clientsBody.textContent = "";
   target.clientActivityBody.textContent = "";
   target.blockedClientCount.textContent = "";
   target.bucketCount.textContent = "";
+  target.cacheCount.textContent = "";
   target.queriedCount.textContent = "";
   target.blockedCount.textContent = "";
   target.clientCount.textContent = "";
@@ -623,6 +729,7 @@ initAdminPage({
         .filter(bucketHasActivity);
       target.bucketCount.textContent = "";
       renderBucketChart(target, buckets);
+      renderCacheChart(target, pick(data, ["totals_by_cache", "totalsByCache", "cache_totals", "cacheTotals", "cache"]));
 
       renderAnalyticsPairTable(
         target.queriedBody,
