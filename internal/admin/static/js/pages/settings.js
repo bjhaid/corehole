@@ -17,9 +17,13 @@ function fields() {
     dnssecNote: required("#dnssec-note"),
     cacheState: required("#cache-state"),
     cacheForm: required("#cache-form"),
-    cacheTTL: required("#cache-ttl"),
+    cacheSuccessTTL: required("#cache-success-ttl"),
+    cacheDenialTTL: required("#cache-denial-ttl"),
     cacheSuccessCapacity: required("#cache-success-capacity"),
     cacheDenialCapacity: required("#cache-denial-capacity"),
+    cachePrefetchAmount: required("#cache-prefetch-amount"),
+    cachePrefetchDuration: required("#cache-prefetch-duration"),
+    cachePrefetchPercent: required("#cache-prefetch-percent"),
     cacheMessage: required("#cache-message"),
     loggingState: required("#logging-state"),
     loggingForm: required("#logging-form"),
@@ -135,14 +139,24 @@ initAdminPage({
     }
 
     function renderCache(data) {
-      const ttl = Number(pick(data, ["cache_ttl", "cacheTTL", "dns.cache_ttl"]) || 0);
-      const successCapacity = Number(pick(data, ["cache_success_capacity", "cacheSuccessCapacity", "dns.cache_success_capacity"]) || 32768);
-      const denialCapacity = Number(pick(data, ["cache_denial_capacity", "cacheDenialCapacity", "dns.cache_denial_capacity"]) || 4096);
-      target.cacheTTL.value = String(ttl);
+      const numberValue = (value, fallback) => Number(value === undefined ? fallback : value);
+      const legacyTTL = numberValue(pick(data, ["cache_ttl", "cacheTTL", "dns.cache_ttl"]), 0);
+      const successTTL = numberValue(pick(data, ["cache_success_ttl", "cacheSuccessTTL", "dns.cache_success_ttl"]), legacyTTL);
+      const denialTTL = numberValue(pick(data, ["cache_denial_ttl", "cacheDenialTTL", "dns.cache_denial_ttl"]), legacyTTL);
+      const successCapacity = numberValue(pick(data, ["cache_success_capacity", "cacheSuccessCapacity", "dns.cache_success_capacity"]), 32768);
+      const denialCapacity = numberValue(pick(data, ["cache_denial_capacity", "cacheDenialCapacity", "dns.cache_denial_capacity"]), 4096);
+      const prefetchAmount = numberValue(pick(data, ["cache_prefetch_amount", "cachePrefetchAmount", "dns.cache_prefetch_amount"]), 0);
+      const prefetchDuration = numberValue(pick(data, ["cache_prefetch_duration", "cachePrefetchDuration", "dns.cache_prefetch_duration"]), 60);
+      const prefetchPercent = numberValue(pick(data, ["cache_prefetch_percent", "cachePrefetchPercent", "dns.cache_prefetch_percent"]), 10);
+      target.cacheSuccessTTL.value = String(successTTL);
+      target.cacheDenialTTL.value = String(denialTTL);
       target.cacheSuccessCapacity.value = String(successCapacity);
       target.cacheDenialCapacity.value = String(denialCapacity);
-      target.cacheState.textContent = ttl > 0
-        ? successCapacity.toLocaleString() + " success / " + denialCapacity.toLocaleString() + " failure"
+      target.cachePrefetchAmount.value = String(prefetchAmount);
+      target.cachePrefetchDuration.value = String(prefetchDuration);
+      target.cachePrefetchPercent.value = String(prefetchPercent);
+      target.cacheState.textContent = successTTL > 0 || denialTTL > 0
+        ? successTTL + "s success / " + denialTTL + "s failure"
         : "disabled";
       setFormDisabled(target.cacheForm, !configUpdateAvailable);
     }
@@ -314,9 +328,13 @@ initAdminPage({
 
     async function saveCache(event) {
       event.preventDefault();
-      const ttl = Number(target.cacheTTL.value);
+      const successTTL = Number(target.cacheSuccessTTL.value);
+      const denialTTL = Number(target.cacheDenialTTL.value);
       const successCapacity = Number(target.cacheSuccessCapacity.value);
       const denialCapacity = Number(target.cacheDenialCapacity.value);
+      const prefetchAmount = Number(target.cachePrefetchAmount.value);
+      const prefetchDuration = Number(target.cachePrefetchDuration.value);
+      const prefetchPercent = Number(target.cachePrefetchPercent.value);
       setFormDisabled(target.cacheForm, true);
       setCacheMessage("Saving DNS cache settings...");
       try {
@@ -325,9 +343,13 @@ initAdminPage({
           headers: {"content-type": "application/json"},
           body: JSON.stringify({
             dns: {
-              cache_ttl: ttl,
+              cache_success_ttl: successTTL,
+              cache_denial_ttl: denialTTL,
               cache_success_capacity: successCapacity,
-              cache_denial_capacity: denialCapacity
+              cache_denial_capacity: denialCapacity,
+              cache_prefetch_amount: prefetchAmount,
+              cache_prefetch_duration: prefetchDuration,
+              cache_prefetch_percent: prefetchPercent
             }
           })
         });

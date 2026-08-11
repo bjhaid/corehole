@@ -65,6 +65,47 @@ func TestSQLiteStoreInitializeSaveLoad(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreLoadMapsLegacyCacheTTLToSplitTTLs(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "corehole.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	_, err = db.DB().ExecContext(ctx, `
+INSERT INTO app_config (id, payload, updated_at)
+VALUES (1, ?, datetime('now'))`,
+		`{
+			"dns": {
+				"listen": ":5353",
+				"cache_ttl": 0,
+				"cache_success_capacity": 0,
+				"cache_denial_capacity": 0,
+				"resolvers": [{"name": "cloudflare", "address": "1.1.1.1:53", "protocol": "udp", "enabled": true}]
+			},
+			"admin": {"listen": "127.0.0.1:8080"},
+			"storage": {"path": "corehole.db"},
+			"blocking": {"response": "nxdomain", "bundled": true, "blocklists": []},
+			"logging": {"level": "info", "format": "text"}
+		}`)
+	if err != nil {
+		t.Fatalf("insert legacy config: %v", err)
+	}
+
+	loaded, err := config.NewSQLiteStore(db.DB()).Load(ctx)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.DNS.CacheEnabled() {
+		t.Fatalf("cache enabled = true, want legacy cache_ttl: 0 to disable cache: %#v", loaded.DNS)
+	}
+}
+
 func TestInitializeStoreKeepsExistingConfig(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "corehole.db"))

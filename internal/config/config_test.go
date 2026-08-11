@@ -22,14 +22,22 @@ func TestDefaultDNSListenUsesStandardPort(t *testing.T) {
 	if cfg.DNS.Listen != ":53" {
 		t.Fatalf("default dns.listen = %q, want :53", cfg.DNS.Listen)
 	}
-	if cfg.DNS.CacheTTL != 30 {
-		t.Fatalf("default dns.cache_ttl = %d, want 30", cfg.DNS.CacheTTL)
+	if cfg.DNS.CacheSuccessTTL != 3600 {
+		t.Fatalf("default dns.cache_success_ttl = %d, want 3600", cfg.DNS.CacheSuccessTTL)
+	}
+	if cfg.DNS.CacheDenialTTL != 30 {
+		t.Fatalf("default dns.cache_denial_ttl = %d, want 30", cfg.DNS.CacheDenialTTL)
 	}
 	if cfg.DNS.CacheSuccessCapacity != 32768 {
 		t.Fatalf("default dns.cache_success_capacity = %d, want 32768", cfg.DNS.CacheSuccessCapacity)
 	}
 	if cfg.DNS.CacheDenialCapacity != 4096 {
 		t.Fatalf("default dns.cache_denial_capacity = %d, want 4096", cfg.DNS.CacheDenialCapacity)
+	}
+	if cfg.DNS.CachePrefetchAmount != 5 ||
+		cfg.DNS.CachePrefetchDuration != 60 ||
+		cfg.DNS.CachePrefetchPercent != 10 {
+		t.Fatalf("default cache prefetch = %d/%d/%d, want 5/60/10", cfg.DNS.CachePrefetchAmount, cfg.DNS.CachePrefetchDuration, cfg.DNS.CachePrefetchPercent)
 	}
 	if cfg.DNS.DNSSEC.Enabled {
 		t.Fatal("default dns.dnssec.enabled = true, want false")
@@ -86,6 +94,40 @@ blocking:
 	}
 }
 
+func TestLoadMapsLegacyCacheTTLToSplitTTLs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "corehole.yaml")
+	if err := os.WriteFile(path, []byte(`
+dns:
+  listen: ":1053"
+  cache_ttl: 0
+  cache_success_capacity: 0
+  cache_denial_capacity: 0
+  resolvers:
+    - name: cloudflare
+      address: "1.1.1.1:53"
+      protocol: udp
+      enabled: true
+admin:
+  listen: "127.0.0.1:8080"
+storage:
+  path: "./corehole.db"
+blocking:
+  response: nxdomain
+  bundled: true
+  blocklists: []
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.DNS.CacheEnabled() {
+		t.Fatalf("cache enabled = true, want legacy cache_ttl: 0 to disable cache: %#v", cfg.DNS)
+	}
+}
+
 func TestValidateRejectsUnsupportedResolverProtocol(t *testing.T) {
 	cfg := Default()
 	cfg.DNS.Resolvers[0].Protocol = "quic"
@@ -127,11 +169,49 @@ func TestValidateConditionalForwarding(t *testing.T) {
 func TestValidateAllowsZeroCacheTTL(t *testing.T) {
 	cfg := Default()
 	cfg.DNS.CacheTTL = 0
+	cfg.DNS.CacheSuccessTTL = 0
+	cfg.DNS.CacheDenialTTL = 0
 	cfg.DNS.CacheSuccessCapacity = 0
 	cfg.DNS.CacheDenialCapacity = 0
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsCacheTTLAboveCoreDNSMax(t *testing.T) {
+	cfg := Default()
+	cfg.DNS.CacheSuccessTTL = MaxCacheSuccessTTL + 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want high success ttl error")
+	}
+
+	cfg = Default()
+	cfg.DNS.CacheDenialTTL = MaxCacheDenialTTL + 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want high denial ttl error")
+	}
+
+	cfg = Default()
+	cfg.DNS.CacheSuccessTTL = 0
+	cfg.DNS.CacheDenialTTL = 0
+	cfg.DNS.CacheTTL = MaxCacheDenialTTL + 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want high legacy ttl error")
+	}
+}
+
+func TestValidateRejectsUnsupportedCachePrefetch(t *testing.T) {
+	cfg := Default()
+	cfg.DNS.CachePrefetchAmount = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want negative prefetch amount error")
+	}
+
+	cfg = Default()
+	cfg.DNS.CachePrefetchPercent = 101
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want high prefetch percent error")
 	}
 }
 

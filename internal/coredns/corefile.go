@@ -18,10 +18,13 @@ func Corefile(cfg config.Config) string {
 	}
 	b.WriteString("    metadata\n")
 	b.WriteString("    corehole\n")
-	if cfg.DNS.CacheTTL > 0 {
-		fmt.Fprintf(&b, "    cache %d {\n", cfg.DNS.CacheTTL)
-		fmt.Fprintf(&b, "        success %d %d\n", cfg.DNS.CacheSuccessCapacity, cfg.DNS.CacheTTL)
-		fmt.Fprintf(&b, "        denial %d %d\n", cfg.DNS.CacheDenialCapacity, cfg.DNS.CacheTTL)
+	if cfg.DNS.CacheEnabled() {
+		b.WriteString("    cache {\n")
+		fmt.Fprintf(&b, "        success %d %d\n", cfg.DNS.CacheSuccessCapacity, cfg.DNS.EffectiveCacheSuccessTTL())
+		fmt.Fprintf(&b, "        denial %d %d\n", cfg.DNS.CacheDenialCapacity, cfg.DNS.EffectiveCacheDenialTTL())
+		if cfg.DNS.CachePrefetchAmount > 0 {
+			fmt.Fprintf(&b, "        prefetch %d %ds %d%%\n", cfg.DNS.CachePrefetchAmount, cfg.DNS.CachePrefetchDuration, cfg.DNS.CachePrefetchPercent)
+		}
 		b.WriteString("    }\n")
 	}
 	if cfg.DNS.DNSSEC.EffectiveMode() == config.DNSSECModeUpstream {

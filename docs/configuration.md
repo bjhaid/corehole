@@ -25,9 +25,14 @@ config source and active blocklist count.
 | `dns.resolvers[].protocol` | string | `"udp"` on the built-in default resolver; `""` for resolver objects you add without a protocol | `""`, `"udp"`, `"dns"`, `"tcp"`, `"tls"`, or `"https"` for enabled resolvers | Controls generated CoreDNS forwarding where practical. `udp`, `dns`, or empty uses normal CoreDNS DNS forwarding. `tls` emits `tls://` when the address has no scheme. `https` emits `https://` when the address has no scheme. `tcp` emits a `force_tcp` forwarding block; because CoreDNS applies `force_tcp` to the whole `forward` stanza, enabled `tcp` resolvers cannot be mixed with enabled non-TCP resolvers. |
 | `dns.resolvers[].tls_server_name` | string | `""` | Must not contain whitespace or braces | Used with `protocol: tls` to emit CoreDNS per-upstream TLS server name syntax, for example `tls://9.9.9.9%dns.quad9.net:853`. This value is now included in admin config snapshots when present. |
 | `dns.resolvers[].enabled` | boolean | `true` on the built-in default resolver; `false` for resolver objects you add without `enabled` in YAML | `true` or `false` | Only enabled resolvers are used. YAML resolver objects should set `enabled: true` unless the resolver is intentionally disabled. |
-| `dns.cache_ttl` | integer seconds | `30` | `0` or greater | Caps CoreDNS cache duration for DNS responses. `0` omits the CoreDNS `cache` directive and disables corehole's generated DNS cache. Positive values emit a CoreDNS `cache` block. |
-| `dns.cache_success_capacity` | integer entries | `32768` | `1024` or greater when `dns.cache_ttl` is positive | Capacity for cached successful responses. CoreDNS divides capacity across 256 shards and rounds configured capacity down to a multiple of 256. |
-| `dns.cache_denial_capacity` | integer entries | `4096` | `1024` or greater when `dns.cache_ttl` is positive | Capacity for cached denial/failure responses such as NXDOMAIN/NODATA. This is intentionally lower than successful-response capacity by default. CoreDNS does not cache generic error responses. |
+| `dns.cache_success_ttl` | integer seconds | `3600` | `0` to `3600` | Maximum CoreDNS cache TTL for successful responses. CoreDNS still respects shorter upstream record TTLs; this cap prevents successful responses from living longer than one hour. Set both success and denial TTLs to `0` to omit the generated CoreDNS `cache` block. |
+| `dns.cache_denial_ttl` | integer seconds | `30` | `0` to `1800` | Maximum CoreDNS cache TTL for denial/failure responses such as NXDOMAIN/NODATA. Keep this shorter than successful responses so newly-created domains are not hidden by stale negative cache entries for long. |
+| `dns.cache_ttl` | integer seconds | unset | `0` to `1800` | Deprecated compatibility field. If the split success/denial TTL fields are absent, this value is used for both success and denial cache TTLs. Prefer `cache_success_ttl` and `cache_denial_ttl`. |
+| `dns.cache_success_capacity` | integer entries | `32768` | `1024` or greater when cache is enabled | Capacity for cached successful responses. CoreDNS divides capacity across 256 shards and rounds configured capacity down to a multiple of 256. |
+| `dns.cache_denial_capacity` | integer entries | `4096` | `1024` or greater when cache is enabled | Capacity for cached denial/failure responses. This is intentionally lower than successful-response capacity by default. CoreDNS does not cache generic error responses. |
+| `dns.cache_prefetch_amount` | integer hits | `5` | `0` or greater | Enables CoreDNS cache prefetch for popular entries once this many queries are seen without gaps longer than `cache_prefetch_duration`. Set to `0` to disable prefetch. |
+| `dns.cache_prefetch_duration` | integer seconds | `60` | `0` or greater | Popularity window for CoreDNS cache prefetch. |
+| `dns.cache_prefetch_percent` | integer percent | `10` | `0` to `100` | Remaining-TTL threshold that triggers CoreDNS prefetch for popular entries. |
 | `dns.dnssec.enabled` | boolean | `false` | `true` or `false` | Enables DNSSEC upstream assistance when paired with `mode: upstream`. When disabled, use `mode: off`. |
 | `dns.dnssec.mode` | string | `"off"` | `"off"`, `"upstream"`, or empty when `enabled: true` | `off` disables DNSSEC assistance. `upstream` sends DNSSEC request flags upstream and preserves validated upstream AD status for clients that request it. Empty mode with `enabled: true` is treated as `upstream`. `local` is not implemented and is rejected. |
 | `dns.conditional_forwarding.enabled` | boolean | `false` | `true` or `false` | Enables one local-domain/reverse-zone conditional forwarding rule before the default `forward .` rule. |
@@ -44,6 +49,12 @@ config source and active blocklist count.
 | `blocking.blocklists` | list of strings | empty list | Local file paths | Files to open and parse at startup. Entries from these files decide which queries are blocked in addition to any bundled entries. Missing or unreadable files fail startup. |
 | `logging.level` | string | `"info"` | `"debug"`, `"info"`, `"warn"`, `"warning"`, `"error"`, or empty | Minimum level for Corehole's own stdout/stderr logs. At the default `info` level, Corehole keeps startup-oriented logs only. `debug` also enables admin access logs, CoreDNS query logs, and CoreDNS error stack traces. `warning` is normalized as `warn`. This does not enable CoreDNS debug mode. |
 | `logging.format` | string | `"text"` | `"text"`, `"json"`, or empty | Output format for process logs. `json` emits structured JSON objects with named fields for Corehole logs and wraps CoreDNS plugin log lines as JSON. In `debug` mode, CoreDNS query logs use a JSON-shaped query format. |
+
+Cache prefetch uses CoreDNS's popularity-based refresh behavior. With the
+defaults, an entry becomes eligible after 5 recent hits with no quiet gap longer
+than 60 seconds, then CoreDNS refreshes it near expiry when the remaining TTL is
+at or below 10 percent. `cache_prefetch_amount` is not "refresh every N
+queries"; it is the hit threshold before prefetch can happen.
 
 SQLite query logging is not exposed as a config flag. Corehole uses
 `modernc.org/sqlite`; the driver does not provide a native statement logging
@@ -70,10 +81,9 @@ Fields read at startup by the running application:
 - `dns.listen`: used to build the CoreDNS server; restart required after YAML changes.
 - `dns.resolvers`: enabled resolver addresses are used to build the CoreDNS
   `forward .` line; restart required after YAML changes.
-- `dns.cache_ttl`: used to build the CoreDNS `cache` directive; restart
-  required after YAML changes.
-- `dns.cache_success_capacity` and `dns.cache_denial_capacity`: used inside the
-  generated CoreDNS `cache` block; restart required after YAML changes.
+- `dns.cache_success_ttl`, `dns.cache_denial_ttl`, capacities, and prefetch
+  fields: used inside the generated CoreDNS `cache` block; restart required
+  after YAML changes.
 - `dns.dnssec`: used to add corehole's upstream DNSSEC helper before CoreDNS
   forwarding; restart required after YAML changes.
 - `dns.conditional_forwarding`: used to build a conditional CoreDNS `forward`
@@ -98,8 +108,8 @@ Fields read at startup by the running application:
   after YAML changes.
 
 The admin API supports `GET /api/config` in `corehole serve`; it returns the
-persisted active configuration, active upstreams, cache TTL, DNSSEC mode, and
-conditional forwarding settings. `PUT /api/config` saves the persisted
+persisted active configuration, active upstreams, cache settings, DNSSEC mode,
+and conditional forwarding settings. `PUT /api/config` saves the persisted
 configuration used by later startups.
 
 `PUT /api/config` can persist these JSON fields to the SQLite `app_config`
@@ -107,9 +117,13 @@ table:
 
 - `dns.listen`
 - `dns.resolvers`
-- `dns.cache_ttl`
+- `dns.cache_success_ttl`
+- `dns.cache_denial_ttl`
 - `dns.cache_success_capacity`
 - `dns.cache_denial_capacity`
+- `dns.cache_prefetch_amount`
+- `dns.cache_prefetch_duration`
+- `dns.cache_prefetch_percent`
 - `dns.dnssec`
 - `dns.conditional_forwarding`
 - `admin.listen`
@@ -146,9 +160,13 @@ Startup validation fails when:
 - an enabled resolver has an empty `address`.
 - an enabled resolver uses an unsupported `protocol`.
 - enabled TCP resolvers are mixed with enabled non-TCP resolvers.
-- `dns.cache_ttl` is negative.
+- deprecated `dns.cache_ttl` is negative or greater than `1800`.
+- `dns.cache_success_ttl` is negative or greater than `3600`.
+- `dns.cache_denial_ttl` is negative or greater than `1800`.
 - `dns.cache_success_capacity` or `dns.cache_denial_capacity` is below `1024`
-  while `dns.cache_ttl` is positive.
+  while cache is enabled.
+- cache prefetch fields are negative, or `dns.cache_prefetch_percent` is
+  greater than `100`.
 - `logging.level` is unsupported.
 - `dns.dnssec.enabled` is true without `mode: upstream`.
 - `dns.dnssec.mode` is `upstream` while `enabled` is false.
@@ -193,9 +211,13 @@ non-privileged local development port:
 ```yaml
 dns:
   listen: ":1053"
-  cache_ttl: 30
+  cache_success_ttl: 3600
+  cache_denial_ttl: 30
   cache_success_capacity: 32768
   cache_denial_capacity: 4096
+  cache_prefetch_amount: 5
+  cache_prefetch_duration: 60
+  cache_prefetch_percent: 10
   dnssec:
     enabled: false
     mode: off
@@ -243,9 +265,13 @@ the right capability.
 ```yaml
 dns:
   listen: ":53"
-  cache_ttl: 300
+  cache_success_ttl: 3600
+  cache_denial_ttl: 30
   cache_success_capacity: 65536
   cache_denial_capacity: 8192
+  cache_prefetch_amount: 5
+  cache_prefetch_duration: 60
+  cache_prefetch_percent: 10
   dnssec:
     enabled: true
     mode: upstream

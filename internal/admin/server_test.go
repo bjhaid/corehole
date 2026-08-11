@@ -785,12 +785,16 @@ func TestQueriesAppliesPrivacyProjectionAfterFiltering(t *testing.T) {
 
 func TestConfigPayload(t *testing.T) {
 	server := newTestServer(WithConfigSnapshot(ConfigSnapshot{
-		DNSListen:            ":5353",
-		AdminListen:          "127.0.0.1:8080",
-		CacheTTL:             300,
-		CacheSuccessCapacity: 65536,
-		CacheDenialCapacity:  4096,
-		DNSSEC:               DNSSECSnapshot{Enabled: true, Mode: "upstream"},
+		DNSListen:             ":5353",
+		AdminListen:           "127.0.0.1:8080",
+		CacheSuccessTTL:       3600,
+		CacheDenialTTL:        30,
+		CacheSuccessCapacity:  65536,
+		CacheDenialCapacity:   4096,
+		CachePrefetchAmount:   5,
+		CachePrefetchDuration: 60,
+		CachePrefetchPercent:  10,
+		DNSSEC:                DNSSECSnapshot{Enabled: true, Mode: "upstream"},
 		ConditionalForwarding: ConditionalForwardingSnapshot{
 			Enabled:  true,
 			Domain:   "lan",
@@ -819,9 +823,13 @@ func TestConfigPayload(t *testing.T) {
 
 	if body.DNSListen != ":5353" ||
 		body.AdminListen != "127.0.0.1:8080" ||
-		body.CacheTTL != 300 ||
+		body.CacheSuccessTTL != 3600 ||
+		body.CacheDenialTTL != 30 ||
 		body.CacheSuccessCapacity != 65536 ||
 		body.CacheDenialCapacity != 4096 ||
+		body.CachePrefetchAmount != 5 ||
+		body.CachePrefetchDuration != 60 ||
+		body.CachePrefetchPercent != 10 ||
 		!body.DNSSEC.Enabled ||
 		body.DNSSEC.Mode != "upstream" ||
 		!body.ConditionalForwarding.Enabled ||
@@ -976,10 +984,14 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 
 	res := putJSON(t, server, "/api/config", map[string]any{
 		"dns": map[string]any{
-			"listen":                 ":5353",
-			"cache_ttl":              300,
-			"cache_success_capacity": 65536,
-			"cache_denial_capacity":  4096,
+			"listen":                  ":5353",
+			"cache_success_ttl":       3600,
+			"cache_denial_ttl":        30,
+			"cache_success_capacity":  65536,
+			"cache_denial_capacity":   4096,
+			"cache_prefetch_amount":   7,
+			"cache_prefetch_duration": 90,
+			"cache_prefetch_percent":  20,
 			"dnssec": map[string]any{
 				"enabled": true,
 				"mode":    "upstream",
@@ -1019,9 +1031,13 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 	}
 	if body.Config.DNSListen != ":5353" ||
 		body.Config.AdminListen != "127.0.0.1:9090" ||
-		body.Config.CacheTTL != 300 ||
+		body.Config.CacheSuccessTTL != 3600 ||
+		body.Config.CacheDenialTTL != 30 ||
 		body.Config.CacheSuccessCapacity != 65536 ||
 		body.Config.CacheDenialCapacity != 4096 ||
+		body.Config.CachePrefetchAmount != 7 ||
+		body.Config.CachePrefetchDuration != 90 ||
+		body.Config.CachePrefetchPercent != 20 ||
 		!body.Config.DNSSEC.Enabled ||
 		body.Config.DNSSEC.Mode != "upstream" ||
 		!body.Config.ConditionalForwarding.Enabled ||
@@ -1050,9 +1066,13 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 	if !store.cfg.DNS.Resolvers[0].Enabled {
 		t.Fatal("resolver enabled = false, want default true")
 	}
-	if store.cfg.DNS.CacheTTL != 300 ||
+	if store.cfg.DNS.CacheSuccessTTL != 3600 ||
+		store.cfg.DNS.CacheDenialTTL != 30 ||
 		store.cfg.DNS.CacheSuccessCapacity != 65536 ||
 		store.cfg.DNS.CacheDenialCapacity != 4096 ||
+		store.cfg.DNS.CachePrefetchAmount != 7 ||
+		store.cfg.DNS.CachePrefetchDuration != 90 ||
+		store.cfg.DNS.CachePrefetchPercent != 20 ||
 		!store.cfg.DNS.ConditionalForwarding.Enabled {
 		t.Fatalf("stored dns config = %#v, want cache TTL and conditional forwarding", store.cfg.DNS)
 	}
@@ -1111,9 +1131,13 @@ func TestConfigUpdateCacheSettingsReloadImmediately(t *testing.T) {
 
 	res := putJSON(t, server, "/api/config", map[string]any{
 		"dns": map[string]any{
-			"cache_ttl":              120,
-			"cache_success_capacity": 65536,
-			"cache_denial_capacity":  4096,
+			"cache_success_ttl":       120,
+			"cache_denial_ttl":        30,
+			"cache_success_capacity":  65536,
+			"cache_denial_capacity":   4096,
+			"cache_prefetch_amount":   7,
+			"cache_prefetch_duration": 90,
+			"cache_prefetch_percent":  20,
 		},
 	}, cookie)
 	if res.Code != http.StatusOK {
@@ -1127,9 +1151,13 @@ func TestConfigUpdateCacheSettingsReloadImmediately(t *testing.T) {
 	if reloader.reloadCount != 1 {
 		t.Fatalf("reloadCount = %d, want 1", reloader.reloadCount)
 	}
-	if reloader.last.DNS.CacheTTL != 120 ||
+	if reloader.last.DNS.CacheSuccessTTL != 120 ||
+		reloader.last.DNS.CacheDenialTTL != 30 ||
 		reloader.last.DNS.CacheSuccessCapacity != 65536 ||
-		reloader.last.DNS.CacheDenialCapacity != 4096 {
+		reloader.last.DNS.CacheDenialCapacity != 4096 ||
+		reloader.last.DNS.CachePrefetchAmount != 7 ||
+		reloader.last.DNS.CachePrefetchDuration != 90 ||
+		reloader.last.DNS.CachePrefetchPercent != 20 {
 		t.Fatalf("reloaded cache config = %#v, want updated capacities", reloader.last.DNS)
 	}
 	if store.saveCount != 1 {

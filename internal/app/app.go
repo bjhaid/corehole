@@ -70,7 +70,7 @@ func Serve(ctx context.Context, args []string) error {
 	runtime := coreplugin.Current()
 	runtime.SetBlockingResponse(cfg.Blocking.Response)
 	applyBlockingPause(runtime, cfg.Blocking)
-	runtime.SetCacheEnabled(cfg.DNS.CacheTTL > 0)
+	runtime.SetCacheEnabled(cfg.DNS.CacheEnabled())
 	filterRepo := filter.NewRepository(store.DB())
 	filterService := filter.NewService(filterRepo)
 	filterStats, err := filterRepo.BlocklistRuntimeStats(ctx)
@@ -180,7 +180,7 @@ func (r dnsRuntimeReloader) ReloadDNS(ctx context.Context, cfg config.Config) er
 	if err := r.server.Reload(ctx, cfg); err != nil {
 		return err
 	}
-	coreplugin.Current().SetCacheEnabled(cfg.DNS.CacheTTL > 0)
+	coreplugin.Current().SetCacheEnabled(cfg.DNS.CacheEnabled())
 	return nil
 }
 
@@ -368,16 +368,21 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 	}
 
 	return admin.ConfigSnapshot{
-		DNSListen:            cfg.DNS.Listen,
-		AdminListen:          cfg.Admin.Listen,
-		Upstreams:            upstreams,
-		CacheTTL:             cfg.DNS.CacheTTL,
-		CacheSuccessCapacity: cfg.DNS.CacheSuccessCapacity,
-		CacheDenialCapacity:  cfg.DNS.CacheDenialCapacity,
-		BlockingResponse:     string(cfg.Blocking.Response),
-		BlockingBundled:      cfg.Blocking.Bundled,
-		BlockingPaused:       cfg.Blocking.Paused,
-		BlockingPauseUntil:   cfg.Blocking.PauseUntil,
+		DNSListen:             cfg.DNS.Listen,
+		AdminListen:           cfg.Admin.Listen,
+		Upstreams:             upstreams,
+		CacheTTL:              cfg.DNS.CacheTTL,
+		CacheSuccessTTL:       cfg.DNS.EffectiveCacheSuccessTTL(),
+		CacheDenialTTL:        cfg.DNS.EffectiveCacheDenialTTL(),
+		CacheSuccessCapacity:  cfg.DNS.CacheSuccessCapacity,
+		CacheDenialCapacity:   cfg.DNS.CacheDenialCapacity,
+		CachePrefetchAmount:   cfg.DNS.CachePrefetchAmount,
+		CachePrefetchDuration: cfg.DNS.CachePrefetchDuration,
+		CachePrefetchPercent:  cfg.DNS.CachePrefetchPercent,
+		BlockingResponse:      string(cfg.Blocking.Response),
+		BlockingBundled:       cfg.Blocking.Bundled,
+		BlockingPaused:        cfg.Blocking.Paused,
+		BlockingPauseUntil:    cfg.Blocking.PauseUntil,
 		Logging: admin.LoggingSnapshot{
 			Level:  string(cfg.Logging.EffectiveLevel()),
 			Format: string(cfg.Logging.EffectiveFormat()),

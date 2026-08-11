@@ -20,14 +20,18 @@ func TestCorefileUsesCoreDNSZonePortSyntax(t *testing.T) {
 	}
 }
 
-func TestCorefileUsesConfiguredCacheTTL(t *testing.T) {
+func TestCorefileUsesConfiguredCacheSettings(t *testing.T) {
 	cfg := config.Default()
-	cfg.DNS.CacheTTL = 300
+	cfg.DNS.CacheSuccessTTL = 3600
+	cfg.DNS.CacheDenialTTL = 30
 	cfg.DNS.CacheSuccessCapacity = 65536
 	cfg.DNS.CacheDenialCapacity = 4096
+	cfg.DNS.CachePrefetchAmount = 7
+	cfg.DNS.CachePrefetchDuration = 90
+	cfg.DNS.CachePrefetchPercent = 20
 
 	got := Corefile(cfg)
-	want := "    cache 300 {\n        success 65536 300\n        denial 4096 300\n    }\n"
+	want := "    cache {\n        success 65536 3600\n        denial 4096 30\n        prefetch 7 90s 20%\n    }\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("Corefile() = %q, want configured cache block %q", got, want)
 	}
@@ -36,6 +40,8 @@ func TestCorefileUsesConfiguredCacheTTL(t *testing.T) {
 func TestCorefileOmitsCacheWhenTTLIsZero(t *testing.T) {
 	cfg := config.Default()
 	cfg.DNS.CacheTTL = 0
+	cfg.DNS.CacheSuccessTTL = 0
+	cfg.DNS.CacheDenialTTL = 0
 
 	got := Corefile(cfg)
 	if strings.Contains(got, "    cache ") {

@@ -43,8 +43,9 @@ The built-in defaults are enough for a first run:
 - Upstream resolver: Cloudflare at `1.1.1.1:53`
 - SQLite storage: `./corehole.db`
 - Blocking: bundled seed blocklist enabled, blocked responses return `NXDOMAIN`
-- DNS cache: 30 second TTL cap, 32,768 successful-response entries, and 4,096
-  denial/failure entries
+- DNS cache: 3600 second successful-response TTL cap, 30 second denial TTL cap,
+  32,768 successful-response entries, 4,096 denial/failure entries, and bounded
+  prefetch for popular cache entries
 - Logging: text-formatted startup-oriented Corehole info logs and CoreDNS error
   logs enabled; `debug` enables admin access logs and CoreDNS query logs
 

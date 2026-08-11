@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"strings"
@@ -22,9 +23,14 @@ type Config struct {
 type DNSConfig struct {
 	Listen                string                `yaml:"listen" json:"listen"`
 	Resolvers             []Resolver            `yaml:"resolvers" json:"resolvers"`
-	CacheTTL              int                   `yaml:"cache_ttl" json:"cache_ttl"`
+	CacheTTL              int                   `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
+	CacheSuccessTTL       int                   `yaml:"cache_success_ttl" json:"cache_success_ttl"`
+	CacheDenialTTL        int                   `yaml:"cache_denial_ttl" json:"cache_denial_ttl"`
 	CacheSuccessCapacity  int                   `yaml:"cache_success_capacity" json:"cache_success_capacity"`
 	CacheDenialCapacity   int                   `yaml:"cache_denial_capacity" json:"cache_denial_capacity"`
+	CachePrefetchAmount   int                   `yaml:"cache_prefetch_amount" json:"cache_prefetch_amount"`
+	CachePrefetchDuration int                   `yaml:"cache_prefetch_duration" json:"cache_prefetch_duration"`
+	CachePrefetchPercent  int                   `yaml:"cache_prefetch_percent" json:"cache_prefetch_percent"`
 	DNSSEC                DNSSECConfig          `yaml:"dnssec" json:"dnssec"`
 	ConditionalForwarding ConditionalForwarding `yaml:"conditional_forwarding" json:"conditional_forwarding"`
 }
@@ -97,10 +103,14 @@ type LoggingConfig struct {
 func Default() Config {
 	return Config{
 		DNS: DNSConfig{
-			CacheTTL:             30,
-			CacheSuccessCapacity: 32768,
-			CacheDenialCapacity:  4096,
-			Listen:               ":53",
+			CacheSuccessTTL:       MaxCacheSuccessTTL,
+			CacheDenialTTL:        DefaultCacheDenialTTL,
+			CacheSuccessCapacity:  32768,
+			CacheDenialCapacity:   4096,
+			CachePrefetchAmount:   5,
+			CachePrefetchDuration: 60,
+			CachePrefetchPercent:  10,
+			Listen:                ":53",
 			DNSSEC: DNSSECConfig{
 				Enabled: false,
 				Mode:    DNSSECModeOff,
@@ -129,6 +139,14 @@ func Default() Config {
 	}
 }
 
+const (
+	MaxCacheSuccessTTL      = 3600
+	MaxCacheDenialTTL       = 1800
+	DefaultCacheDenialTTL   = 30
+	MinCacheCapacity        = 1024
+	MaxCachePrefetchPercent = 100
+)
+
 func Load(path string) (Config, error) {
 	cfg := Default()
 	b, err := os.ReadFile(path)
@@ -142,6 +160,7 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return Config{}, err
 	}
+	normalizeLegacyCacheConfig(&cfg, b)
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -151,6 +170,17 @@ func Load(path string) (Config, error) {
 
 func applyBlocklistRuntimeConfig(cfg Config) {
 	blocklist.SetBundledDefault(cfg.Blocking.Bundled)
+}
+
+func normalizeLegacyCacheConfig(cfg *Config, payload []byte) {
+	if cfg == nil ||
+		!bytes.Contains(payload, []byte("cache_ttl")) ||
+		bytes.Contains(payload, []byte("cache_success_ttl")) ||
+		bytes.Contains(payload, []byte("cache_denial_ttl")) {
+		return
+	}
+	cfg.DNS.CacheSuccessTTL = cfg.DNS.CacheTTL
+	cfg.DNS.CacheDenialTTL = cfg.DNS.CacheTTL
 }
 
 func (c Config) Validate() error {
@@ -172,11 +202,41 @@ func (c Config) Validate() error {
 	if c.DNS.CacheTTL < 0 {
 		return errors.New("dns.cache_ttl must be 0 or greater")
 	}
-	if c.DNS.CacheTTL > 0 {
-		if c.DNS.CacheSuccessCapacity < 1024 {
+	if c.DNS.CacheTTL > MaxCacheDenialTTL {
+		return errors.New("dns.cache_ttl must be 1800 or less")
+	}
+	if c.DNS.EffectiveCacheSuccessTTL() < 0 {
+		return errors.New("dns.cache_success_ttl must be 0 or greater")
+	}
+	if c.DNS.EffectiveCacheDenialTTL() < 0 {
+		return errors.New("dns.cache_denial_ttl must be 0 or greater")
+	}
+	if c.DNS.EffectiveCacheSuccessTTL() > MaxCacheSuccessTTL {
+		return errors.New("dns.cache_success_ttl must be 3600 or less")
+	}
+	if c.DNS.EffectiveCacheDenialTTL() > MaxCacheDenialTTL {
+		return errors.New("dns.cache_denial_ttl must be 1800 or less")
+	}
+	if c.DNS.CachePrefetchAmount < 0 {
+		return errors.New("dns.cache_prefetch_amount must be 0 or greater")
+	}
+	if c.DNS.CachePrefetchDuration < 0 {
+		return errors.New("dns.cache_prefetch_duration must be 0 or greater")
+	}
+	if c.DNS.CachePrefetchPercent < 0 || c.DNS.CachePrefetchPercent > MaxCachePrefetchPercent {
+		return errors.New("dns.cache_prefetch_percent must be between 0 and 100")
+	}
+	if c.DNS.CacheEnabled() {
+		if c.DNS.EffectiveCacheSuccessTTL() == 0 {
+			return errors.New("dns.cache_success_ttl must be greater than 0 when cache is enabled")
+		}
+		if c.DNS.EffectiveCacheDenialTTL() == 0 {
+			return errors.New("dns.cache_denial_ttl must be greater than 0 when cache is enabled")
+		}
+		if c.DNS.CacheSuccessCapacity < MinCacheCapacity {
 			return errors.New("dns.cache_success_capacity must be at least 1024 when cache is enabled")
 		}
-		if c.DNS.CacheDenialCapacity < 1024 {
+		if c.DNS.CacheDenialCapacity < MinCacheCapacity {
 			return errors.New("dns.cache_denial_capacity must be at least 1024 when cache is enabled")
 		}
 	}
@@ -252,6 +312,24 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c DNSConfig) CacheEnabled() bool {
+	return c.EffectiveCacheSuccessTTL() > 0 || c.EffectiveCacheDenialTTL() > 0
+}
+
+func (c DNSConfig) EffectiveCacheSuccessTTL() int {
+	if c.CacheSuccessTTL > 0 || c.CacheDenialTTL > 0 {
+		return c.CacheSuccessTTL
+	}
+	return c.CacheTTL
+}
+
+func (c DNSConfig) EffectiveCacheDenialTTL() int {
+	if c.CacheSuccessTTL > 0 || c.CacheDenialTTL > 0 {
+		return c.CacheDenialTTL
+	}
+	return c.CacheTTL
 }
 
 func (d DNSSECConfig) Validate() error {

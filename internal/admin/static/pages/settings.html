@@ -40,8 +40,12 @@
               </div>
               <form id="cache-form" class="control-box cache-form">
                 <div>
-                  <label for="cache-ttl">TTL cap seconds</label>
-                  <input id="cache-ttl" name="cache_ttl" type="number" min="0" step="1" required>
+                  <label for="cache-success-ttl">Success TTL cap</label>
+                  <input id="cache-success-ttl" name="cache_success_ttl" type="number" min="0" max="3600" step="1" required>
+                </div>
+                <div>
+                  <label for="cache-denial-ttl">Failure TTL cap</label>
+                  <input id="cache-denial-ttl" name="cache_denial_ttl" type="number" min="0" max="1800" step="1" required>
                 </div>
                 <div>
                   <label for="cache-success-capacity">Success capacity</label>
@@ -50,6 +54,18 @@
                 <div>
                   <label for="cache-denial-capacity">Failure capacity</label>
                   <input id="cache-denial-capacity" name="cache_denial_capacity" type="number" min="1024" step="256" required>
+                </div>
+                <div>
+                  <label for="cache-prefetch-amount">Prefetch hits</label>
+                  <input id="cache-prefetch-amount" name="cache_prefetch_amount" type="number" min="0" step="1" required>
+                </div>
+                <div>
+                  <label for="cache-prefetch-duration">Prefetch window seconds</label>
+                  <input id="cache-prefetch-duration" name="cache_prefetch_duration" type="number" min="0" step="1" required>
+                </div>
+                <div>
+                  <label for="cache-prefetch-percent">Prefetch threshold %</label>
+                  <input id="cache-prefetch-percent" name="cache_prefetch_percent" type="number" min="0" max="100" step="1" required>
                 </div>
                 <button id="cache-save" type="submit">Save cache</button>
               </form>

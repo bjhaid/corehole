@@ -79,6 +79,7 @@ func (s *SQLiteStore) Load(ctx context.Context) (Config, error) {
 	if err := json.Unmarshal([]byte(payload), &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode persisted config: %w", err)
 	}
+	normalizeLegacyCacheConfig(&cfg, []byte(payload))
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate persisted config: %w", err)
 	}

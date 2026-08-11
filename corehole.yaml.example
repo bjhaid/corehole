@@ -1,8 +1,12 @@
 dns:
   listen: ":53"
-  cache_ttl: 30
+  cache_success_ttl: 3600
+  cache_denial_ttl: 30
   cache_success_capacity: 32768
   cache_denial_capacity: 4096
+  cache_prefetch_amount: 5
+  cache_prefetch_duration: 60
+  cache_prefetch_percent: 10
   resolvers:
     - name: cloudflare
       address: "1.1.1.1:53"
