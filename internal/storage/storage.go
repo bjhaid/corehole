@@ -337,6 +337,24 @@ ON audit_events (retry_count)`,
 ON admin_sessions (expires_at)`,
 			},
 		},
+		{
+			version: 12,
+			name:    "add analytics summary covering indexes",
+			statements: []string{
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_action_idx
+ON audit_events (timestamp, action)`,
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_cache_status_idx
+ON audit_events (timestamp, cache_status)`,
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_query_name_idx
+ON audit_events (timestamp, query_name)`,
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_action_query_name_idx
+ON audit_events (timestamp, action, query_name)`,
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_client_ip_idx
+ON audit_events (timestamp, client_ip)`,
+				`CREATE INDEX IF NOT EXISTS audit_events_timestamp_action_client_ip_idx
+ON audit_events (timestamp, action, client_ip)`,
+			},
+		},
 	}
 
 	for _, migration := range migrations {

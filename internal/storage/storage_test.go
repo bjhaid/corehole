@@ -82,6 +82,12 @@ func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 		"audit_events_cache_status_idx",
 		"audit_events_forward_duration_ns_idx",
 		"audit_events_retry_count_idx",
+		"audit_events_timestamp_action_idx",
+		"audit_events_timestamp_cache_status_idx",
+		"audit_events_timestamp_query_name_idx",
+		"audit_events_timestamp_action_query_name_idx",
+		"audit_events_timestamp_client_ip_idx",
+		"audit_events_timestamp_action_client_ip_idx",
 		"admin_sessions_expires_at_idx",
 	} {
 		assertIndexExists(t, ctx, store, index)
@@ -153,8 +159,8 @@ func TestOpenMigrationsAreIdempotent(t *testing.T) {
 	if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrations); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if migrations != 11 {
-		t.Fatalf("migration rows = %d, want 11", migrations)
+	if migrations != 12 {
+		t.Fatalf("migration rows = %d, want 12", migrations)
 	}
 }
 

@@ -2,7 +2,6 @@ import {initAdminPage} from "../admin.js";
 import {fetchJSON, fetchOptionalJSON} from "../lib/api.js";
 import {required} from "../lib/dom.js";
 import {configureTemplates, setText} from "../lib/elements.js";
-import {analyticsActionCount, analyticsTotalCount} from "../lib/analytics-summary.js";
 import {bundledConfigValue, displayNumber, firstDefined, listFrom, pick} from "../lib/format.js";
 import {renderUpstreamRows} from "../lib/upstreams.js";
 
@@ -42,18 +41,18 @@ function renderBundledState(target, data) {
   target.bundledState.textContent = typeof bundled === "boolean" ? (bundled ? "enabled" : "disabled") : "unavailable";
 }
 
-function renderDashboard(target, data, config, filterResult, analyticsSummary) {
+function renderDashboard(target, data, config, filterResult) {
   const dashboard = data || {};
   const details = Object.assign({}, config || {}, dashboard);
   target.recent.textContent = displayNumber(dashboardCount(dashboard, [
     "total_queries", "totalQueries", "total_query_count", "totalQueryCount", "query_count", "queryCount", "queries", "total_recent_queries", "totalRecentQueries", "recent_queries", "recentQueries"
-  ], analyticsTotalCount(analyticsSummary)));
+  ]));
   target.blocked.textContent = displayNumber(dashboardCount(dashboard, [
     "blocked_queries", "blockedQueries", "total_blocked_queries", "totalBlockedQueries", "blocked_count", "blockedCount", "blocked", "blocked_recent_queries", "blockedRecentQueries"
-  ], analyticsActionCount(analyticsSummary, ["block", "blocked", "deny", "denied"])));
+  ]));
   target.allowed.textContent = displayNumber(dashboardCount(dashboard, [
     "allowed_queries", "allowedQueries", "total_allowed_queries", "totalAllowedQueries", "allowed_count", "allowedCount", "allowed", "allowed_recent_queries", "allowedRecentQueries"
-  ], analyticsActionCount(analyticsSummary, ["allow", "allowed"])));
+  ]));
   target.dropped.textContent = displayNumber(firstDefined(dashboard, [
     "dropped_audit_events", "droppedAuditEvents", "audit_dropped", "auditDropped", "dropped_events", "droppedEvents"
   ]));
@@ -96,7 +95,6 @@ initAdminPage({
     const target = fields();
     let config = {};
     let filterResult = null;
-    let analyticsSummary = null;
     let timer = 0;
     let liveInFlight = false;
 
@@ -110,18 +108,16 @@ initAdminPage({
     }
 
     async function refresh() {
-      const [dashboard, nextConfig, filterLists, summary] = await Promise.all([
+      const [dashboard, nextConfig, filterLists] = await Promise.all([
         fetchJSON("/api/dashboard"),
         fetchOptionalJSON("/api/config"),
-        fetchOptionalJSON("/api/filter/lists"),
-        fetchOptionalJSON("/api/analytics/summary")
+        fetchOptionalJSON("/api/filter/lists")
       ]);
       if (nextConfig.ok) {
         config = nextConfig.data || {};
       }
       filterResult = filterLists;
-      analyticsSummary = summary;
-      renderDashboard(target, dashboard || {}, nextConfig.ok ? nextConfig.data || {} : config, filterResult, analyticsSummary);
+      renderDashboard(target, dashboard || {}, nextConfig.ok ? nextConfig.data || {} : config, filterResult);
       setUpdatedStatus("Dashboard");
     }
 
@@ -131,12 +127,8 @@ initAdminPage({
       }
       liveInFlight = true;
       try {
-        const [dashboard, summary] = await Promise.all([
-          fetchJSON("/api/dashboard"),
-          fetchOptionalJSON("/api/analytics/summary")
-        ]);
-        analyticsSummary = summary;
-        renderDashboard(target, dashboard || {}, config, filterResult, analyticsSummary);
+        const dashboard = await fetchJSON("/api/dashboard");
+        renderDashboard(target, dashboard || {}, config, filterResult);
         setUpdatedStatus("Live data");
       } catch (err) {
         if (err.message !== "authentication_required") {
