@@ -87,6 +87,7 @@
       .client-form-grid,
       .group-form-grid,
       .cache-form,
+      .logging-form,
       .upstream-form {
         grid-template-columns: 1fr;
       }

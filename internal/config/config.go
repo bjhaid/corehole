@@ -16,6 +16,7 @@ type Config struct {
 	Admin    AdminConfig    `yaml:"admin" json:"admin"`
 	Storage  StorageConfig  `yaml:"storage" json:"storage"`
 	Blocking BlockingConfig `yaml:"blocking" json:"blocking"`
+	Logging  LoggingConfig  `yaml:"logging" json:"logging"`
 }
 
 type DNSConfig struct {
@@ -72,6 +73,27 @@ type BlockingConfig struct {
 	Blocklists []string                     `yaml:"blocklists" json:"blocklists"`
 }
 
+type LoggingLevel string
+
+const (
+	LoggingLevelDebug LoggingLevel = "debug"
+	LoggingLevelInfo  LoggingLevel = "info"
+	LoggingLevelWarn  LoggingLevel = "warn"
+	LoggingLevelError LoggingLevel = "error"
+)
+
+type LoggingFormat string
+
+const (
+	LoggingFormatText LoggingFormat = "text"
+	LoggingFormatJSON LoggingFormat = "json"
+)
+
+type LoggingConfig struct {
+	Level  LoggingLevel  `yaml:"level" json:"level"`
+	Format LoggingFormat `yaml:"format" json:"format"`
+}
+
 func Default() Config {
 	return Config{
 		DNS: DNSConfig{
@@ -99,6 +121,10 @@ func Default() Config {
 		Blocking: BlockingConfig{
 			Response: coreholedns.BlockingResponseNXDOMAIN,
 			Bundled:  true,
+		},
+		Logging: LoggingConfig{
+			Level:  LoggingLevelInfo,
+			Format: LoggingFormatText,
 		},
 	}
 }
@@ -136,6 +162,12 @@ func (c Config) Validate() error {
 	}
 	if c.Storage.Path == "" {
 		return errors.New("storage.path is required")
+	}
+	if !supportedLoggingLevel(c.Logging.Level) {
+		return errors.New("logging.level must be debug, info, warn, warning, error, or empty")
+	}
+	if !supportedLoggingFormat(c.Logging.Format) {
+		return errors.New("logging.format must be text, json, or empty")
 	}
 	if c.DNS.CacheTTL < 0 {
 		return errors.New("dns.cache_ttl must be 0 or greater")
@@ -252,8 +284,48 @@ func (d DNSSECConfig) EffectiveMode() DNSSECMode {
 	return mode
 }
 
+func (l LoggingConfig) EffectiveLevel() LoggingLevel {
+	switch strings.ToLower(strings.TrimSpace(string(l.Level))) {
+	case string(LoggingLevelDebug):
+		return LoggingLevelDebug
+	case string(LoggingLevelWarn), "warning":
+		return LoggingLevelWarn
+	case string(LoggingLevelError):
+		return LoggingLevelError
+	default:
+		return LoggingLevelInfo
+	}
+}
+
+func (l LoggingConfig) EffectiveFormat() LoggingFormat {
+	switch strings.ToLower(strings.TrimSpace(string(l.Format))) {
+	case string(LoggingFormatJSON):
+		return LoggingFormatJSON
+	default:
+		return LoggingFormatText
+	}
+}
+
 func (d DNSSECConfig) NormalizedMode() DNSSECMode {
 	return DNSSECMode(strings.ToLower(strings.TrimSpace(string(d.Mode))))
+}
+
+func supportedLoggingLevel(level LoggingLevel) bool {
+	switch strings.ToLower(strings.TrimSpace(string(level))) {
+	case "", string(LoggingLevelDebug), string(LoggingLevelInfo), string(LoggingLevelWarn), "warning", string(LoggingLevelError):
+		return true
+	default:
+		return false
+	}
+}
+
+func supportedLoggingFormat(format LoggingFormat) bool {
+	switch strings.ToLower(strings.TrimSpace(string(format))) {
+	case "", string(LoggingFormatText), string(LoggingFormatJSON):
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizedResolverProtocol(protocol string) string {

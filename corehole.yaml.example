@@ -16,3 +16,6 @@ blocking:
   response: nxdomain
   bundled: true
   blocklists: []
+logging:
+  level: info
+  format: text

@@ -14,6 +14,7 @@ import (
 	"github.com/bjhaid/corehole/internal/audit"
 	"github.com/bjhaid/corehole/internal/config"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
+	coreholelog "github.com/bjhaid/corehole/internal/logging"
 )
 
 const (
@@ -127,6 +128,7 @@ type ConfigSnapshot struct {
 	BlockingBundled       bool
 	BlockingPaused        bool
 	BlockingPauseUntil    string
+	Logging               LoggingSnapshot
 	Blocklists            []string
 	StoragePath           string
 }
@@ -135,6 +137,7 @@ type ConfigUpdateRequest struct {
 	DNS      *DNSConfigUpdate      `json:"dns,omitempty"`
 	Admin    *AdminConfigUpdate    `json:"admin,omitempty"`
 	Blocking *BlockingConfigUpdate `json:"blocking,omitempty"`
+	Logging  *LoggingConfigUpdate  `json:"logging,omitempty"`
 }
 
 type DNSConfigUpdate struct {
@@ -178,6 +181,11 @@ type BlockingConfigUpdate struct {
 	Blocklists *[]string `json:"blocklists,omitempty"`
 }
 
+type LoggingConfigUpdate struct {
+	Level  *string `json:"level,omitempty"`
+	Format *string `json:"format,omitempty"`
+}
+
 type ConfigUpdateResult struct {
 	Snapshot        ConfigSnapshot
 	RestartRequired bool
@@ -202,6 +210,11 @@ type ConditionalForwardingSnapshot struct {
 type DNSSECSnapshot struct {
 	Enabled bool   `json:"enabled"`
 	Mode    string `json:"mode"`
+}
+
+type LoggingSnapshot struct {
+	Level  string `json:"level"`
+	Format string `json:"format"`
 }
 
 type dashboardResponse struct {
@@ -271,6 +284,7 @@ type configResponse struct {
 	BlockingBundled       bool                          `json:"blocking_bundled"`
 	BlockingPaused        bool                          `json:"blocking_paused"`
 	BlockingPauseUntil    string                        `json:"blocking_pause_until,omitempty"`
+	Logging               LoggingSnapshot               `json:"logging"`
 	Blocklists            []string                      `json:"blocklists"`
 	BlocklistPaths        []string                      `json:"blocklist_paths"`
 	BlocklistCount        int                           `json:"blocklist_count"`
@@ -629,6 +643,7 @@ func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 			CacheSuccessCapacity: defaultConfig.DNS.CacheSuccessCapacity,
 			CacheDenialCapacity:  defaultConfig.DNS.CacheDenialCapacity,
 			BlockingBundled:      defaultConfig.Blocking.Bundled,
+			Logging:              loggingSnapshotFromConfig(defaultConfig.Logging),
 			DNSSEC:               DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},
 			Upstreams:            []UpstreamSnapshot{},
 			Blocklists:           []string{},
@@ -658,6 +673,7 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 		BlockingBundled:       snapshot.BlockingBundled,
 		BlockingPaused:        snapshot.BlockingPaused,
 		BlockingPauseUntil:    snapshot.BlockingPauseUntil,
+		Logging:               snapshot.Logging,
 		Blocklists:            blocklists,
 		BlocklistPaths:        blocklists,
 		BlocklistCount:        len(blocklists),
@@ -697,6 +713,9 @@ func (m configStoreManager) Update(ctx context.Context, req ConfigUpdateRequest)
 	}
 	if err := m.store.Save(ctx, next); err != nil {
 		return ConfigUpdateResult{}, err
+	}
+	if current.Logging.Level != next.Logging.Level || current.Logging.Format != next.Logging.Format {
+		coreholelog.Configure(string(next.Logging.EffectiveLevel()), string(next.Logging.EffectiveFormat()))
 	}
 
 	return ConfigUpdateResult{
@@ -745,7 +764,20 @@ func applyConfigUpdate(cfg config.Config, req ConfigUpdateRequest) config.Config
 			cfg.Blocking.Blocklists = cloneStrings(*req.Blocking.Blocklists)
 		}
 	}
+	if req.Logging != nil {
+		cfg.Logging = loggingUpdateToConfig(cfg.Logging, *req.Logging)
+	}
 	return cfg
+}
+
+func loggingUpdateToConfig(current config.LoggingConfig, update LoggingConfigUpdate) config.LoggingConfig {
+	if update.Level != nil {
+		current.Level = config.LoggingLevel(strings.ToLower(strings.TrimSpace(*update.Level)))
+	}
+	if update.Format != nil {
+		current.Format = config.LoggingFormat(strings.ToLower(strings.TrimSpace(*update.Format)))
+	}
+	return current
 }
 
 func dnssecUpdateToConfig(current config.DNSSECConfig, update DNSSECUpdate) config.DNSSECConfig {
@@ -853,6 +885,7 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 		BlockingBundled:    cfg.Blocking.Bundled,
 		BlockingPaused:     cfg.Blocking.Paused,
 		BlockingPauseUntil: cfg.Blocking.PauseUntil,
+		Logging:            loggingSnapshotFromConfig(cfg.Logging),
 		Blocklists:         cloneStrings(cfg.Blocking.Blocklists),
 		StoragePath:        cfg.Storage.Path,
 	}
@@ -861,14 +894,34 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 func shouldReloadDNSImmediately(current config.Config, next config.Config, reloader DNSReloader) bool {
 	return reloader != nil &&
 		current.DNS.Listen == next.DNS.Listen &&
-		!reflect.DeepEqual(current.DNS, next.DNS)
+		(!reflect.DeepEqual(current.DNS, next.DNS) ||
+			coreDNSLoggingChanged(current.Logging, next.Logging))
 }
 
 func restartRequired(current config.Config, next config.Config, dnsReloaded bool) bool {
 	dnsRestartRequired := !reflect.DeepEqual(current.DNS, next.DNS) && !dnsReloaded
+	corednsLoggingRestartRequired := coreDNSLoggingChanged(current.Logging, next.Logging) && !dnsReloaded
 	return dnsRestartRequired ||
+		corednsLoggingRestartRequired ||
 		current.Admin.Listen != next.Admin.Listen ||
 		!reflect.DeepEqual(current.Blocking.Blocklists, next.Blocking.Blocklists)
+}
+
+func coreDNSLoggingChanged(current config.LoggingConfig, next config.LoggingConfig) bool {
+	currentLevel := current.EffectiveLevel()
+	nextLevel := next.EffectiveLevel()
+	if currentLevel != nextLevel {
+		return true
+	}
+	return currentLevel == config.LoggingLevelDebug &&
+		current.EffectiveFormat() != next.EffectiveFormat()
+}
+
+func loggingSnapshotFromConfig(cfg config.LoggingConfig) LoggingSnapshot {
+	return LoggingSnapshot{
+		Level:  string(cfg.EffectiveLevel()),
+		Format: string(cfg.EffectiveFormat()),
+	}
 }
 
 func parseQueriesLimit(r *http.Request) (int, bool) {

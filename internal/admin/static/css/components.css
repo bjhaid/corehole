@@ -133,6 +133,18 @@
       align-items: end;
       margin-bottom: 10px;
     }
+    .logging-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr)) auto;
+      gap: 8px 10px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    .logging-level-field,
+    .logging-format-field,
+    .logging-form button {
+      grid-column: span 1;
+    }
     .upstream-field-wide,
     .upstream-actions {
       grid-column: span 2;

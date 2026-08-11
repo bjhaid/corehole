@@ -12,7 +12,10 @@ import (
 func Corefile(cfg config.Config) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s {\n", zoneAddress(cfg.DNS.Listen))
-	b.WriteString("    errors\n")
+	writeErrorLogging(&b, cfg.Logging.EffectiveLevel() == config.LoggingLevelDebug)
+	if cfg.Logging.EffectiveLevel() == config.LoggingLevelDebug {
+		writeQueryLogging(&b, cfg.Logging.EffectiveFormat() == config.LoggingFormatJSON)
+	}
 	b.WriteString("    metadata\n")
 	b.WriteString("    corehole\n")
 	if cfg.DNS.CacheTTL > 0 {
@@ -35,6 +38,26 @@ func Corefile(cfg config.Config) string {
 	writeForward(&b, ".", forwardResolversFromConfig(cfg.DNS.Resolvers))
 	b.WriteString("}\n")
 	return b.String()
+}
+
+const coreDNSJSONLogFormat = `{"component":"coredns","msg":"dns_query","remote":"{remote}","port":"{port}","id":"{>id}","type":"{type}","class":"{class}","name":"{name}","proto":"{proto}","size":"{size}","dnssec_do":"{>do}","bufsize":"{>bufsize}","rcode":"{rcode}","rflags":"{>rflags}","response_size":"{rsize}","duration":"{duration}","response_class":"{/log/class}","response_type":"{/log/type}"}`
+
+func writeQueryLogging(b *strings.Builder, jsonFormat bool) {
+	if jsonFormat {
+		fmt.Fprintf(b, "    log . %q\n", coreDNSJSONLogFormat)
+		return
+	}
+	b.WriteString("    log\n")
+}
+
+func writeErrorLogging(b *strings.Builder, debug bool) {
+	if debug {
+		b.WriteString("    errors {\n")
+		b.WriteString("        stacktrace\n")
+		b.WriteString("    }\n")
+		return
+	}
+	b.WriteString("    errors\n")
 }
 
 type forwardResolver struct {

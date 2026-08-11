@@ -43,6 +43,52 @@ func TestCorefileOmitsCacheWhenTTLIsZero(t *testing.T) {
 	}
 }
 
+func TestCorefileEnablesVerboseLoggingAtDebugLevel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Logging.Level = config.LoggingLevelDebug
+
+	got := Corefile(cfg)
+	if !strings.Contains(got, "    log\n") {
+		t.Fatalf("Corefile() = %q, want query log directive", got)
+	}
+	if !strings.Contains(got, "    errors {\n        stacktrace\n    }\n") {
+		t.Fatalf("Corefile() = %q, want errors stacktrace block", got)
+	}
+}
+
+func TestCorefileUsesJSONQueryLogFormatWhenConfigured(t *testing.T) {
+	cfg := config.Default()
+	cfg.Logging.Level = config.LoggingLevelDebug
+	cfg.Logging.Format = config.LoggingFormatJSON
+
+	got := Corefile(cfg)
+	for _, want := range []string{
+		`log . "{\"component\":\"coredns\"`,
+		`\"msg\":\"dns_query\"`,
+		`\"name\":\"{name}\"`,
+		`\"rcode\":\"{rcode}\"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Corefile() = %q, want JSON query log fragment %q", got, want)
+		}
+	}
+}
+
+func TestCorefileUsesErrorLoggingWithoutQueryLogByDefault(t *testing.T) {
+	cfg := config.Default()
+
+	got := Corefile(cfg)
+	if !strings.Contains(got, "    errors\n") {
+		t.Fatalf("Corefile() = %q, want errors directive", got)
+	}
+	if strings.Contains(got, "    log\n") {
+		t.Fatalf("Corefile() = %q, want query log omitted", got)
+	}
+	if strings.Contains(got, "stacktrace") {
+		t.Fatalf("Corefile() = %q, want stacktrace omitted", got)
+	}
+}
+
 func TestCorefileHonorsResolverProtocols(t *testing.T) {
 	cfg := config.Default()
 	cfg.DNS.Resolvers = []config.Resolver{{

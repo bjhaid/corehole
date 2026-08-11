@@ -56,6 +56,33 @@
               <div id="cache-message" class="status-line cache-message" role="status" aria-live="polite"></div>
             </article>
 
+            <article class="panel">
+              <div class="panel-header">
+                <h3>Logging</h3>
+                <span id="logging-state">--</span>
+              </div>
+              <form id="logging-form" class="control-box logging-form">
+                <div class="logging-level-field">
+                  <label for="logging-level">Level</label>
+                  <select id="logging-level" name="level">
+                    <option value="debug">Debug</option>
+                    <option value="info">Info</option>
+                    <option value="warn">Warn</option>
+                    <option value="error">Error</option>
+                  </select>
+                </div>
+                <div class="logging-format-field">
+                  <label for="logging-format">Format</label>
+                  <select id="logging-format" name="format">
+                    <option value="text">Text</option>
+                    <option value="json">JSON</option>
+                  </select>
+                </div>
+                <button id="logging-save" type="submit">Save logging</button>
+              </form>
+              <div id="logging-message" class="status-line logging-message" role="status" aria-live="polite"></div>
+            </article>
+
             <article class="panel settings-upstream-panel">
               <div class="panel-header">
                 <h3>Upstream resolvers</h3>

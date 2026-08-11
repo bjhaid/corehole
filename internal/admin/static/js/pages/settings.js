@@ -21,6 +21,11 @@ function fields() {
     cacheSuccessCapacity: required("#cache-success-capacity"),
     cacheDenialCapacity: required("#cache-denial-capacity"),
     cacheMessage: required("#cache-message"),
+    loggingState: required("#logging-state"),
+    loggingForm: required("#logging-form"),
+    loggingLevel: required("#logging-level"),
+    loggingFormat: required("#logging-format"),
+    loggingMessage: required("#logging-message"),
     upstreamCount: required("#upstream-count"),
     upstreamForm: required("#upstream-form"),
     upstreamIndex: required("#upstream-index"),
@@ -94,9 +99,18 @@ initAdminPage({
       target.cacheMessage.classList.toggle("error", Boolean(isError));
     }
 
+    function setLoggingMessage(text, isError) {
+      target.loggingMessage.textContent = text || "";
+      target.loggingMessage.classList.toggle("error", Boolean(isError));
+    }
+
     function setAPIKeyMessage(text, isError) {
       target.apiKeySecret.textContent = text || "";
       target.apiKeySecret.classList.toggle("error", Boolean(isError));
+    }
+
+    function syncLoggingControls() {
+      setFormDisabled(target.loggingForm, !configUpdateAvailable);
     }
 
     function resetUpstreamForm() {
@@ -133,6 +147,17 @@ initAdminPage({
       setFormDisabled(target.cacheForm, !configUpdateAvailable);
     }
 
+    function renderLogging(data) {
+      const logging = pick(data, ["logging"]) || {};
+      const level = String(pick(logging, ["level"]) || "info").toLowerCase();
+      const format = String(pick(logging, ["format"]) || "text").toLowerCase();
+      target.loggingLevel.value = ["debug", "info", "warn", "error"].includes(level) ? level : "info";
+      target.loggingFormat.value = ["text", "json"].includes(format) ? format : "text";
+      target.loggingState.textContent = target.loggingLevel.value + " / " + target.loggingFormat.value;
+      setFormDisabled(target.loggingForm, !configUpdateAvailable);
+      syncLoggingControls();
+    }
+
     function renderConfig(result) {
       if (!result.ok) {
         target.dnsListen.textContent = "--";
@@ -144,6 +169,7 @@ initAdminPage({
         setFormDisabled(target.upstreamForm, true);
         setFormDisabled(target.dnssecForm, true);
         setFormDisabled(target.cacheForm, true);
+        setFormDisabled(target.loggingForm, true);
         return;
       }
 
@@ -161,6 +187,7 @@ initAdminPage({
       setFormDisabled(target.upstreamForm, !configUpdateAvailable);
       renderDNSSEC(data);
       renderCache(data);
+      renderLogging(data);
     }
 
     function renderAPIKeys(result) {
@@ -320,6 +347,38 @@ initAdminPage({
       }
     }
 
+    async function saveLogging(event) {
+      event.preventDefault();
+      setFormDisabled(target.loggingForm, true);
+      setLoggingMessage("Saving logging settings...");
+      try {
+        const result = await fetchJSON("/api/config", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({
+            logging: {
+              level: target.loggingLevel.value,
+              format: target.loggingFormat.value
+            }
+          })
+        });
+        renderConfig({ok: true, data: result.config || {}});
+        const status = result.restart_required
+          ? "Logging saved. Restart required for DNS logging changes."
+          : "Logging applied.";
+        setLoggingMessage(status, false);
+        setUpdated(status);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setLoggingMessage("Logging update failed: " + err.message, true);
+      } finally {
+        setFormDisabled(target.loggingForm, !configUpdateAvailable);
+        syncLoggingControls();
+      }
+    }
+
     async function submitUpstream(event) {
       event.preventDefault();
       const next = currentUpstreams.slice();
@@ -438,6 +497,7 @@ initAdminPage({
 
     on(target.dnssecForm, "submit", saveDNSSEC);
     on(target.cacheForm, "submit", saveCache);
+    on(target.loggingForm, "submit", saveLogging);
     on(target.upstreamForm, "submit", submitUpstream);
     on(target.upstreamCancel, "click", () => {
       resetUpstreamForm();

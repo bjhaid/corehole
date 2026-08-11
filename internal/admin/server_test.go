@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bjhaid/corehole/internal/audit"
 	"github.com/bjhaid/corehole/internal/config"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
+	coreholelog "github.com/bjhaid/corehole/internal/logging"
 	"github.com/bjhaid/corehole/internal/storage"
 )
 
@@ -62,6 +65,41 @@ func TestConsoleUnknownPathReturnsNotFound(t *testing.T) {
 
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("status code = %d, want %d", res.Code, http.StatusNotFound)
+	}
+}
+
+func TestAdminRequestLoggingRequiresDebugLevel(t *testing.T) {
+	var buf bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOutput)
+	coreholelog.Configure("info", "text")
+	defer coreholelog.Configure("info", "text")
+
+	server := newTestServer()
+	res := get(t, server, "/api/status", nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", res.Code, http.StatusOK)
+	}
+	if got := buf.String(); got != "" {
+		t.Fatalf("request log at info level = %q, want none", got)
+	}
+
+	coreholelog.SetLevel("debug")
+	res = get(t, server, "/api/status", nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", res.Code, http.StatusOK)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"admin_request",
+		"method=GET",
+		"path=/api/status",
+		"status=200",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("request log missing %q in %q", want, got)
+		}
 	}
 }
 
@@ -760,6 +798,10 @@ func TestConfigPayload(t *testing.T) {
 		},
 		BlockingResponse: "null-ip",
 		StoragePath:      "/var/lib/corehole/corehole.db",
+		Logging: LoggingSnapshot{
+			Level:  "debug",
+			Format: "json",
+		},
 		Upstreams: []UpstreamSnapshot{
 			{Name: "cloudflare", Address: "1.1.1.1:53", Protocol: "udp", TLSServerName: "cloudflare-dns.com"},
 			{Name: "quad9", Address: "9.9.9.9:53", Protocol: "udp"},
@@ -787,6 +829,8 @@ func TestConfigPayload(t *testing.T) {
 		body.ConditionalForwarding.Resolver != "192.168.1.1:53" ||
 		body.BlockingResponse != "null-ip" ||
 		!body.BlockingBundled ||
+		body.Logging.Level != "debug" ||
+		body.Logging.Format != "json" ||
 		body.StoragePath != "/var/lib/corehole/corehole.db" {
 		t.Fatalf("config payload = %#v", body)
 	}
@@ -960,6 +1004,10 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 			"bundled":    false,
 			"blocklists": []string{"ads.txt", "tracking.txt"},
 		},
+		"logging": map[string]any{
+			"level":  "warn",
+			"format": "json",
+		},
 	}, cookie)
 	if res.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
@@ -979,7 +1027,9 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 		!body.Config.ConditionalForwarding.Enabled ||
 		body.Config.ConditionalForwarding.Domain != "lan" ||
 		body.Config.BlockingResponse != "refused" ||
-		body.Config.BlockingBundled {
+		body.Config.BlockingBundled ||
+		body.Config.Logging.Level != "warn" ||
+		body.Config.Logging.Format != "json" {
 		t.Fatalf("config update response = %#v", body.Config)
 	}
 	if len(body.Config.Upstreams) != 1 || body.Config.Upstreams[0].Name != "quad9" {
@@ -1008,6 +1058,10 @@ func TestConfigUpdateSavesSafeFields(t *testing.T) {
 	}
 	if !store.cfg.DNS.DNSSEC.Enabled || store.cfg.DNS.DNSSEC.Mode != config.DNSSECModeUpstream {
 		t.Fatalf("stored dnssec config = %#v, want upstream enabled", store.cfg.DNS.DNSSEC)
+	}
+	if store.cfg.Logging.Level != config.LoggingLevelWarn ||
+		store.cfg.Logging.Format != config.LoggingFormatJSON {
+		t.Fatalf("stored logging config = %#v, want updated logging", store.cfg.Logging)
 	}
 }
 
@@ -1080,6 +1134,142 @@ func TestConfigUpdateCacheSettingsReloadImmediately(t *testing.T) {
 	}
 	if store.saveCount != 1 {
 		t.Fatalf("saveCount = %d, want 1", store.saveCount)
+	}
+}
+
+func TestConfigUpdateDebugLoggingReloadsCoreDNSImmediately(t *testing.T) {
+	coreholelog.Configure("info", "text")
+	defer coreholelog.Configure("info", "text")
+	initial := config.Default()
+	store := &fakeConfigStore{cfg: initial}
+	reloader := &fakeDNSReloader{}
+	server := newTestServer(WithConfigStoreAndDNSReloader(store, reloader))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/config", map[string]any{
+		"logging": map[string]any{
+			"level": "debug",
+		},
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+
+	body := decodeResponse[configUpdateResponse](t, res)
+	if body.RestartRequired {
+		t.Fatal("restart_required = true, want false")
+	}
+	if reloader.reloadCount != 1 {
+		t.Fatalf("reloadCount = %d, want 1", reloader.reloadCount)
+	}
+	if reloader.last.Logging.Level != config.LoggingLevelDebug {
+		t.Fatalf("reloaded logging config = %#v, want debug level", reloader.last.Logging)
+	}
+	if !coreholelog.Enabled(coreholelog.LevelDebug) {
+		t.Fatal("debug logging disabled after config update, want enabled")
+	}
+}
+
+func TestConfigUpdateLoggingFormatAppliesImmediately(t *testing.T) {
+	coreholelog.Configure("info", "text")
+	defer coreholelog.Configure("info", "text")
+	initial := config.Default()
+	store := &fakeConfigStore{cfg: initial}
+	reloader := &fakeDNSReloader{}
+	server := newTestServer(WithConfigStoreAndDNSReloader(store, reloader))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/config", map[string]any{
+		"logging": map[string]any{
+			"format": "json",
+		},
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+
+	body := decodeResponse[configUpdateResponse](t, res)
+	if body.RestartRequired {
+		t.Fatal("restart_required = true, want false")
+	}
+	if reloader.reloadCount != 0 {
+		t.Fatalf("reloadCount = %d, want 0", reloader.reloadCount)
+	}
+	if store.cfg.Logging.Format != config.LoggingFormatJSON {
+		t.Fatalf("stored logging config = %#v, want json format", store.cfg.Logging)
+	}
+}
+
+func TestConfigUpdateLoggingFormatReloadsCoreDNSWhenDebug(t *testing.T) {
+	coreholelog.Configure("debug", "text")
+	defer coreholelog.Configure("info", "text")
+	initial := config.Default()
+	initial.Logging.Level = config.LoggingLevelDebug
+	store := &fakeConfigStore{cfg: initial}
+	reloader := &fakeDNSReloader{}
+	server := newTestServer(WithConfigStoreAndDNSReloader(store, reloader))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/config", map[string]any{
+		"logging": map[string]any{
+			"format": "json",
+		},
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+
+	body := decodeResponse[configUpdateResponse](t, res)
+	if body.RestartRequired {
+		t.Fatal("restart_required = true, want false")
+	}
+	if reloader.reloadCount != 1 {
+		t.Fatalf("reloadCount = %d, want 1", reloader.reloadCount)
+	}
+	if reloader.last.Logging.Format != config.LoggingFormatJSON {
+		t.Fatalf("reloaded logging config = %#v, want json format", reloader.last.Logging)
+	}
+}
+
+func TestConfigUpdateLoggingFormatAffectsNextAdminRequest(t *testing.T) {
+	var buf bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOutput)
+	coreholelog.Configure("info", "text")
+	defer coreholelog.Configure("info", "text")
+
+	initial := config.Default()
+	store := &fakeConfigStore{cfg: initial}
+	reloader := &fakeDNSReloader{}
+	server := newTestServer(WithConfigStoreAndDNSReloader(store, reloader))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/config", map[string]any{
+		"logging": map[string]any{
+			"level":  "debug",
+			"format": "json",
+		},
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+	buf.Reset()
+
+	res = get(t, server, "/api/status", nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", res.Code, http.StatusOK)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &record); err != nil {
+		t.Fatalf("admin request log is not JSON: %v\n%s", err, buf.String())
+	}
+	if record["msg"] != "admin_request" ||
+		record["level"] != "debug" ||
+		record["method"] != "GET" ||
+		record["path"] != "/api/status" {
+		t.Fatalf("admin request record = %#v, want structured request fields", record)
 	}
 }
 

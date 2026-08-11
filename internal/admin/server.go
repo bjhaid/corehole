@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	coreholelog "github.com/bjhaid/corehole/internal/logging"
 )
 
 const defaultSessionCookieName = "corehole_admin_session"
@@ -100,7 +102,44 @@ func NewServer(userStore UserStore, opts ...Option) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	if !coreholelog.Enabled(coreholelog.LevelDebug) {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+
+	started := time.Now()
+	recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.mux.ServeHTTP(recorder, r)
+	coreholelog.Debug(
+		"admin_request",
+		"method", r.Method,
+		"path", r.URL.RequestURI(),
+		"status", recorder.status,
+		"bytes", recorder.bytes,
+		"duration_ms", time.Since(started).Milliseconds(),
+		"remote", r.RemoteAddr,
+	)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(data)
+	r.bytes += n
+	return n, err
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
 
 func (s *Server) routes() {

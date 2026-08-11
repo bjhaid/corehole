@@ -400,6 +400,25 @@ func TestConsoleUpstreamResolverLayoutUsesResponsiveConstraints(t *testing.T) {
 	}
 }
 
+func TestConsoleSettingsExposeLoggingControls(t *testing.T) {
+	server := newTestServer()
+	body := string(consoleAssetBundle(t, server))
+
+	for _, want := range []string{
+		`id="logging-form"`,
+		`id="logging-level"`,
+		`id="logging-format"`,
+		`logging: {`,
+		`format: target.loggingFormat.value`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("console body missing logging control %q", want)
+		}
+	}
+	assertSelectOptions(t, body, "logging-level", []string{"debug", "info", "warn", "error"})
+	assertSelectOptions(t, body, "logging-format", []string{"text", "json"})
+}
+
 func assertSelectOptions(t *testing.T, body, id string, values []string) {
 	t.Helper()
 

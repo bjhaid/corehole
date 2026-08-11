@@ -37,6 +37,12 @@ func TestDefaultDNSListenUsesStandardPort(t *testing.T) {
 	if cfg.DNS.DNSSEC.Mode != DNSSECModeOff {
 		t.Fatalf("default dns.dnssec.mode = %q, want off", cfg.DNS.DNSSEC.Mode)
 	}
+	if cfg.Logging.Level != LoggingLevelInfo {
+		t.Fatalf("default logging.level = %q, want info", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != LoggingFormatText {
+		t.Fatalf("default logging.format = %q, want text", cfg.Logging.Format)
+	}
 }
 
 func TestLoadCanDisableBundledBlocking(t *testing.T) {
@@ -141,6 +147,20 @@ func TestValidateRejectsTooSmallCacheCapacity(t *testing.T) {
 	cfg.DNS.CacheDenialCapacity = 512
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want small denial cache capacity error")
+	}
+}
+
+func TestValidateRejectsUnsupportedLoggingConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Logging.Level = "trace"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unsupported logging level error")
+	}
+
+	cfg = Default()
+	cfg.Logging.Format = "xml"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unsupported logging format error")
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	_ "github.com/coredns/coredns/plugin/cache"
 	_ "github.com/coredns/coredns/plugin/errors"
 	_ "github.com/coredns/coredns/plugin/forward"
+	_ "github.com/coredns/coredns/plugin/log"
 	_ "github.com/coredns/coredns/plugin/metadata"
 )
 

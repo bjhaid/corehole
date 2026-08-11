@@ -42,6 +42,13 @@ config source and active blocklist count.
 | `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
 | `blocking.pause_until` | string | `""` | Empty or RFC3339 timestamp | Optional end time for a timed pause. Empty with `blocking.paused: true` means pause indefinitely. Expired timestamps are ignored by the DNS runtime. |
 | `blocking.blocklists` | list of strings | empty list | Local file paths | Files to open and parse at startup. Entries from these files decide which queries are blocked in addition to any bundled entries. Missing or unreadable files fail startup. |
+| `logging.level` | string | `"info"` | `"debug"`, `"info"`, `"warn"`, `"warning"`, `"error"`, or empty | Minimum level for Corehole's own stdout/stderr logs. At the default `info` level, Corehole keeps startup-oriented logs only. `debug` also enables admin access logs, CoreDNS query logs, and CoreDNS error stack traces. `warning` is normalized as `warn`. This does not enable CoreDNS debug mode. |
+| `logging.format` | string | `"text"` | `"text"`, `"json"`, or empty | Output format for process logs. `json` emits structured JSON objects with named fields for Corehole logs and wraps CoreDNS plugin log lines as JSON. In `debug` mode, CoreDNS query logs use a JSON-shaped query format. |
+
+SQLite query logging is not exposed as a config flag. Corehole uses
+`modernc.org/sqlite`; the driver does not provide a native statement logging
+toggle comparable to CoreDNS's `log` plugin. Corehole intentionally avoids
+wrapping every repository call just to produce SQL logs.
 
 Unknown YAML fields are not rejected by the current loader. Treat a typo as
 ignored unless validation fails for another reason.
@@ -85,6 +92,10 @@ Fields read at startup by the running application:
   setting during config load; restart required after YAML changes.
 - `blocking.blocklists`: files are opened and parsed at startup; restart
   required after changing the list or changing a referenced blocklist file.
+- `logging.level`: applied to Corehole/admin logging at startup and used to
+  build CoreDNS `errors`/`log` directives; restart required after YAML changes.
+- `logging.format`: applied to Corehole logging at startup; restart required
+  after YAML changes.
 
 The admin API supports `GET /api/config` in `corehole serve`; it returns the
 persisted active configuration, active upstreams, cache TTL, DNSSEC mode, and
@@ -105,12 +116,15 @@ table:
 - `blocking.response`
 - `blocking.bundled`
 - `blocking.blocklists`
+- `logging.level`
+- `logging.format`
 
-That update path preserves `storage.path`. DNS resolver/cache/DNSSEC and
-conditional forwarding changes can apply through DNS hot reload when the DNS
-listen address is unchanged and the active update manager has a DNS reloader.
-If hot reload is unavailable, if the DNS listen address changes, or if a change
-touches `admin.listen` or configured blocklist paths, the response reports
+That update path preserves `storage.path`. DNS resolver/cache/DNSSEC,
+conditional forwarding, and CoreDNS-relevant `logging.level` changes can apply through DNS hot
+reload when the DNS listen address is unchanged and the active update manager
+has a DNS reloader. If hot reload is unavailable, if the DNS listen address
+changes, or if a change touches `admin.listen`, `logging.level`,
+`logging.format`, or configured blocklist paths, the response reports
 `restart_required: true`.
 
 To force a later startup to seed active config from YAML again, stop corehole and
@@ -135,6 +149,7 @@ Startup validation fails when:
 - `dns.cache_ttl` is negative.
 - `dns.cache_success_capacity` or `dns.cache_denial_capacity` is below `1024`
   while `dns.cache_ttl` is positive.
+- `logging.level` is unsupported.
 - `dns.dnssec.enabled` is true without `mode: upstream`.
 - `dns.dnssec.mode` is `upstream` while `enabled` is false.
 - `dns.dnssec.mode` is any unsupported value, including `local`.
@@ -202,6 +217,9 @@ blocking:
   bundled: true
   blocklists:
     - ./blocklist.txt
+logging:
+  level: info
+  format: text
 ```
 
 Run it with:
@@ -254,6 +272,9 @@ blocking:
   blocklists:
     - "/etc/corehole/blocklists/ads.txt"
     - "/etc/corehole/blocklists/tracking.txt"
+logging:
+  level: info
+  format: text
 ```
 
 ## DNSSEC

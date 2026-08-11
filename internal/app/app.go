@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"github.com/bjhaid/corehole/internal/coreplugin"
 	"github.com/bjhaid/corehole/internal/filter"
 	"github.com/bjhaid/corehole/internal/localdns"
+	coreholelog "github.com/bjhaid/corehole/internal/logging"
 	"github.com/bjhaid/corehole/internal/storage"
 )
 
@@ -64,6 +64,7 @@ func Serve(ctx context.Context, args []string) error {
 		return fmt.Errorf("config store: %w", err)
 	}
 	cfg := initResult.Config
+	coreholelog.Configure(string(cfg.Logging.EffectiveLevel()), string(cfg.Logging.EffectiveFormat()))
 
 	blocklist.SetBundledDefault(cfg.Blocking.Bundled)
 	runtime := coreplugin.Current()
@@ -308,39 +309,49 @@ func (r localDNSRuntimeReloader) ReloadLocalDNS(ctx context.Context) error {
 }
 
 func logConfigSource(configPath string, source config.Source, bootstrap config.Config, active config.Config, filterStats filter.BlocklistRuntimeStats) {
-	log.Printf(
-		"active config source=%s config=%s active_yaml_blocklist_paths=%d db_filter_lists_enabled=%d db_filter_lists_imported=%d db_filter_entries_enabled=%d",
-		source,
-		configPath,
-		len(active.Blocking.Blocklists),
-		filterStats.EnabledLists,
-		filterStats.ImportedEnabledLists,
-		filterStats.EnabledEntries,
+	coreholelog.Info(
+		"active_config",
+		"source", source,
+		"config", configPath,
+		"active_yaml_blocklist_paths", len(active.Blocking.Blocklists),
+		"db_filter_lists_enabled", filterStats.EnabledLists,
+		"db_filter_lists_imported", filterStats.ImportedEnabledLists,
+		"db_filter_entries_enabled", filterStats.EnabledEntries,
 	)
 	if source == config.SourcePersisted && !reflect.DeepEqual(bootstrap, active) {
-		log.Printf("persisted config active from SQLite app_config; YAML changes in %s are not applied until persisted config is updated or reseeded (yaml_blocklist_paths=%d active_yaml_blocklist_paths=%d)", configPath, len(bootstrap.Blocking.Blocklists), len(active.Blocking.Blocklists))
+		coreholelog.Info(
+			"persisted_config_active",
+			"config", configPath,
+			"yaml_blocklist_paths", len(bootstrap.Blocking.Blocklists),
+			"active_yaml_blocklist_paths", len(active.Blocking.Blocklists),
+		)
 	}
 }
 
 func logStartup(configPath string, source config.Source, cfg config.Config, blocking blocklist.Snapshot, filterStats filter.BlocklistRuntimeStats) {
-	log.Printf("corehole started config=%s config_source=%s storage=%s", configPath, source, cfg.Storage.Path)
-	log.Printf("admin console listening on http://%s", cfg.Admin.Listen)
-	log.Printf("dns listening on %s/udp and %s/tcp", cfg.DNS.Listen, cfg.DNS.Listen)
+	coreholelog.Info("corehole_started", "config", configPath, "config_source", source, "storage", cfg.Storage.Path)
+	coreholelog.Info("admin_listening", "url", "http://"+cfg.Admin.Listen, "listen", cfg.Admin.Listen)
+	coreholelog.Info("dns_listening", "listen", cfg.DNS.Listen, "udp", cfg.DNS.Listen, "tcp", cfg.DNS.Listen)
 	for _, resolver := range cfg.DNS.Resolvers {
 		if resolver.Enabled {
-			log.Printf("upstream resolver enabled name=%s protocol=%s address=%s", resolver.Name, resolver.Protocol, resolver.Address)
+			coreholelog.Info(
+				"upstream_resolver_enabled",
+				"name", resolver.Name,
+				"protocol", resolver.Protocol,
+				"address", resolver.Address,
+			)
 		}
 	}
-	log.Printf(
-		"blocking response=%s yaml_blocklist_paths=%d bundled_enabled=%t db_filter_lists_enabled=%d db_filter_lists_imported=%d db_filter_entries_enabled=%d runtime_entries=%d reload_status=%s",
-		cfg.Blocking.Response,
-		len(blocking.Paths),
-		blocking.Bundled,
-		filterStats.EnabledLists,
-		filterStats.ImportedEnabledLists,
-		filterStats.EnabledEntries,
-		blocking.EntryCount,
-		blocking.Status,
+	coreholelog.Info(
+		"blocking_ready",
+		"response", cfg.Blocking.Response,
+		"yaml_blocklist_paths", len(blocking.Paths),
+		"bundled_enabled", blocking.Bundled,
+		"db_filter_lists_enabled", filterStats.EnabledLists,
+		"db_filter_lists_imported", filterStats.ImportedEnabledLists,
+		"db_filter_entries_enabled", filterStats.EnabledEntries,
+		"runtime_entries", blocking.EntryCount,
+		"reload_status", blocking.Status,
 	)
 }
 
@@ -367,7 +378,11 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 		BlockingBundled:      cfg.Blocking.Bundled,
 		BlockingPaused:       cfg.Blocking.Paused,
 		BlockingPauseUntil:   cfg.Blocking.PauseUntil,
-		Blocklists:           append([]string(nil), cfg.Blocking.Blocklists...),
-		StoragePath:          cfg.Storage.Path,
+		Logging: admin.LoggingSnapshot{
+			Level:  string(cfg.Logging.EffectiveLevel()),
+			Format: string(cfg.Logging.EffectiveFormat()),
+		},
+		Blocklists:  append([]string(nil), cfg.Blocking.Blocklists...),
+		StoragePath: cfg.Storage.Path,
 	}
 }
