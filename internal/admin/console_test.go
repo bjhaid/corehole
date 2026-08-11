@@ -10,10 +10,17 @@ import (
 )
 
 func consoleResponseBody(t *testing.T, server http.Handler, path string, contentType string) []byte {
+	return consoleResponseBodyWithCookie(t, server, path, contentType, nil)
+}
+
+func consoleResponseBodyWithCookie(t *testing.T, server http.Handler, path string, contentType string, cookie *http.Cookie) []byte {
 	t.Helper()
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
 	server.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -26,6 +33,11 @@ func consoleResponseBody(t *testing.T, server http.Handler, path string, content
 }
 
 func consoleAssetBundle(t *testing.T, server http.Handler) []byte {
+	t.Helper()
+	return consoleAssetBundleWithCookie(t, server, setupSession(t, server))
+}
+
+func consoleAssetBundleWithCookie(t *testing.T, server http.Handler, cookie *http.Cookie) []byte {
 	t.Helper()
 
 	paths := []struct {
@@ -54,7 +66,11 @@ func consoleAssetBundle(t *testing.T, server http.Handler) []byte {
 
 	var body []byte
 	for _, asset := range paths {
-		body = append(body, consoleResponseBody(t, server, asset.path, asset.contentType)...)
+		var requestCookie *http.Cookie
+		if strings.HasPrefix(asset.path, "/admin/") {
+			requestCookie = cookie
+		}
+		body = append(body, consoleResponseBodyWithCookie(t, server, asset.path, asset.contentType, requestCookie)...)
 		body = append(body, '\n')
 	}
 	return body
@@ -62,7 +78,8 @@ func consoleAssetBundle(t *testing.T, server http.Handler) []byte {
 
 func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 	server := newTestServer()
-	body := consoleResponseBody(t, server, "/admin/dashboard", "text/html; charset=utf-8")
+	cookie := setupSession(t, server)
+	body := consoleResponseBodyWithCookie(t, server, "/admin/dashboard", "text/html; charset=utf-8", cookie)
 
 	for _, want := range [][]byte{
 		[]byte("<h1>Corehole</h1>"),
@@ -71,6 +88,8 @@ func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 		[]byte(`<link rel="stylesheet" href="/assets/css/app.css">`),
 		[]byte(`window.__COREHOLE_PAGE__ = "dashboard";`),
 		[]byte(`<script type="module" src="/assets/js/pages/dashboard.js"></script>`),
+		[]byte(`<span id="session-state" class="session-state">Authenticated</span>`),
+		[]byte(`<button id="logout" class="secondary" type="button">Log out</button>`),
 		[]byte(`class="side-nav" aria-label="Admin sections"`),
 		[]byte(`id="nav-dashboard" class="nav-link" href="/admin/dashboard" aria-current="page"`),
 		[]byte(`id="nav-queries" class="nav-link" href="/admin/queries"`),
@@ -94,6 +113,9 @@ func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 	}
 	for _, notWant := range [][]byte{
 		[]byte(`data-route=`),
+		[]byte(`id="auth-view"`),
+		[]byte(`id="setup-panel"`),
+		[]byte(`id="login-panel"`),
 		[]byte(`id="panel-query-log"`),
 		[]byte(`id="panel-analytics"`),
 		[]byte(`id="panel-blocklists"`),
@@ -111,13 +133,30 @@ func TestConsoleDashboardServesBackendRenderedPage(t *testing.T) {
 	}
 }
 
-func TestConsoleRootAndAdminRedirectToDashboard(t *testing.T) {
+func TestConsoleRootAndAdminRedirectByAuthState(t *testing.T) {
 	server := newTestServer()
 
 	for _, path := range []string{"/", "/admin"} {
-		t.Run(path, func(t *testing.T) {
+		t.Run(path+" setup required", func(t *testing.T) {
 			res := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, path, nil)
+			server.ServeHTTP(res, req)
+
+			if res.Code != http.StatusFound {
+				t.Fatalf("status code = %d, want %d", res.Code, http.StatusFound)
+			}
+			if got := res.Header().Get("Location"); got != "/admin/setup" {
+				t.Fatalf("location = %q, want /admin/setup", got)
+			}
+		})
+	}
+
+	cookie := setupSession(t, server)
+	for _, path := range []string{"/", "/admin"} {
+		t.Run(path+" authenticated", func(t *testing.T) {
+			res := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.AddCookie(cookie)
 			server.ServeHTTP(res, req)
 
 			if res.Code != http.StatusFound {
@@ -128,10 +167,101 @@ func TestConsoleRootAndAdminRedirectToDashboard(t *testing.T) {
 			}
 		})
 	}
+
+	for _, path := range []string{"/", "/admin"} {
+		t.Run(path+" login required", func(t *testing.T) {
+			res := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			server.ServeHTTP(res, req)
+
+			if res.Code != http.StatusFound {
+				t.Fatalf("status code = %d, want %d", res.Code, http.StatusFound)
+			}
+			if got := res.Header().Get("Location"); got != "/admin/login" {
+				t.Fatalf("location = %q, want /admin/login", got)
+			}
+		})
+	}
+}
+
+func TestConsoleAuthRoutesServePublicSetupAndLoginPages(t *testing.T) {
+	server := newTestServer()
+
+	setupBody := consoleResponseBody(t, server, "/admin/setup", "text/html; charset=utf-8")
+	for _, want := range [][]byte{
+		[]byte(`window.__COREHOLE_PAGE__ = "setup";`),
+		[]byte(`<script type="module" src="/assets/js/pages/auth.js"></script>`),
+		[]byte(`id="auth-view"`),
+		[]byte(`id="setup-panel"`),
+	} {
+		if !bytes.Contains(setupBody, want) {
+			t.Fatalf("setup body missing %q", want)
+		}
+	}
+	if bytes.Contains(setupBody, []byte(`id="app-view"`)) {
+		t.Fatalf("setup body includes app view")
+	}
+	if bytes.Contains(setupBody, []byte(`id="template-query-row"`)) {
+		t.Fatalf("setup body includes app row templates")
+	}
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/login", nil)
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/admin/setup" {
+		t.Fatalf("login before setup code=%d location=%q, want redirect to setup", res.Code, res.Header().Get("Location"))
+	}
+
+	_ = setupSession(t, server)
+	loginBody := consoleResponseBody(t, server, "/admin/login", "text/html; charset=utf-8")
+	for _, want := range [][]byte{
+		[]byte(`window.__COREHOLE_PAGE__ = "login";`),
+		[]byte(`<script type="module" src="/assets/js/pages/auth.js"></script>`),
+		[]byte(`id="auth-view"`),
+		[]byte(`id="login-panel"`),
+	} {
+		if !bytes.Contains(loginBody, want) {
+			t.Fatalf("login body missing %q", want)
+		}
+	}
+	if bytes.Contains(loginBody, []byte(`id="app-view"`)) {
+		t.Fatalf("login body includes app view")
+	}
+	if bytes.Contains(loginBody, []byte(`id="template-query-row"`)) {
+		t.Fatalf("login body includes app row templates")
+	}
+}
+
+func TestConsoleAdminPagesRedirectWhenUnauthenticated(t *testing.T) {
+	server := newTestServer()
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/admin/setup" {
+		t.Fatalf("dashboard before setup code=%d location=%q, want setup redirect", res.Code, res.Header().Get("Location"))
+	}
+
+	cookie := setupSession(t, server)
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/admin/login", nil)
+	req.AddCookie(cookie)
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/admin/dashboard" {
+		t.Fatalf("login while authenticated code=%d location=%q, want dashboard redirect", res.Code, res.Header().Get("Location"))
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusFound || res.Header().Get("Location") != "/admin/login" {
+		t.Fatalf("dashboard after setup without session code=%d location=%q, want login redirect", res.Code, res.Header().Get("Location"))
+	}
 }
 
 func TestConsoleAdminRoutesServeDistinctBackendPages(t *testing.T) {
 	server := newTestServer()
+	cookie := setupSession(t, server)
 
 	for _, tt := range []struct {
 		path       string
@@ -150,7 +280,7 @@ func TestConsoleAdminRoutesServeDistinctBackendPages(t *testing.T) {
 		{"/admin/settings", "settings", "settings.js", []byte("Settings / API Keys"), []byte(`id="panel-dashboard"`)},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			body := consoleResponseBody(t, server, tt.path, "text/html; charset=utf-8")
+			body := consoleResponseBodyWithCookie(t, server, tt.path, "text/html; charset=utf-8", cookie)
 			if !bytes.Contains(body, []byte(`window.__COREHOLE_PAGE__ = "`+tt.page+`";`)) {
 				t.Fatalf("%s missing page bootstrap for %s", tt.path, tt.page)
 			}
@@ -199,6 +329,7 @@ func TestConsoleEmbeddedAssetsAvailable(t *testing.T) {
 		"static/js/lib/forms.js",
 		"static/js/lib/upstreams.js",
 		"static/js/pages/dashboard.js",
+		"static/js/pages/auth.js",
 		"static/js/pages/queries.js",
 		"static/js/pages/analytics.js",
 		"static/js/pages/blocklists.js",
@@ -292,7 +423,8 @@ func TestConsoleAssetRoutesRejectInvalidNestedPaths(t *testing.T) {
 
 func TestConsoleQueryLogTypeActionAndResponseFiltersAreSelects(t *testing.T) {
 	server := newTestServer()
-	body := string(consoleResponseBody(t, server, "/admin/queries", "text/html; charset=utf-8"))
+	cookie := setupSession(t, server)
+	body := string(consoleResponseBodyWithCookie(t, server, "/admin/queries", "text/html; charset=utf-8", cookie))
 
 	if strings.Contains(body, `<input id="query-filter-type"`) {
 		t.Fatalf("console body includes type filter input")
@@ -338,8 +470,9 @@ func TestConsoleQueryLogTypeActionAndResponseFiltersAreSelects(t *testing.T) {
 
 func TestConsoleQueryLogColumnSettingsExposeDiagnosticColumns(t *testing.T) {
 	server := newTestServer()
-	body := string(consoleResponseBody(t, server, "/admin/queries", "text/html; charset=utf-8"))
-	assets := string(consoleAssetBundle(t, server))
+	cookie := setupSession(t, server)
+	body := string(consoleResponseBodyWithCookie(t, server, "/admin/queries", "text/html; charset=utf-8", cookie))
+	assets := string(consoleAssetBundleWithCookie(t, server, cookie))
 
 	for _, want := range []string{
 		`id="query-column-toggle"`,

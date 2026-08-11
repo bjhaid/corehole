@@ -20,17 +20,22 @@
           </div>
         </div>
         <div class="top-actions">
-          <span id="session-state" class="session-state">Checking admin status...</span>
-          <button id="logout" class="secondary hidden" type="button">Log out</button>
+          {{if .Authenticated}}
+          <span id="session-state" class="session-state">Authenticated</span>
+          <button id="logout" class="secondary" type="button">Log out</button>
+          {{else}}
+          <span id="session-state" class="session-state">{{if eq .AuthMode "setup"}}Setup required{{else}}Logged out{{end}}</span>
+          {{end}}
         </div>
       </div>
     </header>
 
     <main class="admin-main">
+      {{if .AuthMode}}
       <section id="auth-view" class="auth-grid">
         <div class="auth-summary">
           <h2>Administration</h2>
-          <p id="summary">Checking admin status...</p>
+          <p id="summary">{{if eq .AuthMode "setup"}}Create the first admin password.{{else}}Log in to manage Corehole.{{end}}</p>
           <div class="auth-facts" aria-label="Console sections">
             <div class="fact">
               <strong>Dashboard</strong>
@@ -52,7 +57,7 @@
         </div>
 
         <div class="auth-card">
-          <section id="setup-panel" class="hidden">
+          <section id="setup-panel"{{if ne .AuthMode "setup"}} class="hidden"{{end}}>
             <h2>First-run setup</h2>
             <p>Create the first admin password for this Corehole instance.</p>
             <form id="setup">
@@ -62,7 +67,7 @@
             </form>
           </section>
 
-          <section id="login-panel" class="hidden">
+          <section id="login-panel"{{if ne .AuthMode "login"}} class="hidden"{{end}}>
             <h2>Log in</h2>
             <p>Use the admin password to open the console.</p>
             <form id="login">
@@ -75,8 +80,10 @@
           <div id="message" class="status-line" role="status" aria-live="polite"></div>
         </div>
       </section>
+      {{end}}
 
-      <section id="app-view" class="admin-layout hidden">
+      {{if .Authenticated}}
+      <section id="app-view" class="admin-layout">
         <nav class="side-nav" aria-label="Admin sections">
           <div class="side-nav-title">Administration</div>
           {{range .Nav}}
@@ -102,9 +109,12 @@
           {{if eq .Page.Name "settings"}}{{template "page.settings" .}}{{end}}
         </div>
       </section>
+      {{end}}
     </main>
   </div>
+  {{if .Authenticated}}
   {{template "row.templates" .}}
+  {{end}}
   <script>
     window.__COREHOLE_PAGE__ = "{{.Page.Name}}";
   </script>

@@ -37,8 +37,10 @@ type consoleNavItem struct {
 }
 
 type consoleViewData struct {
-	Page consolePage
-	Nav  []consoleNavItem
+	Page          consolePage
+	Nav           []consoleNavItem
+	Authenticated bool
+	AuthMode      string
 }
 
 var consolePages = []consolePage{
@@ -58,7 +60,7 @@ func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		if r.URL.Path == "/" || r.URL.Path == "/admin" {
+		if r.URL.Path == "/" || r.URL.Path == "/admin" || r.URL.Path == "/admin/login" || r.URL.Path == "/admin/setup" {
 			methodNotAllowed(w)
 			return
 		}
@@ -67,8 +69,36 @@ func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	setup, err := s.userStore.IsSetup(r.Context())
+	if err != nil {
+		http.Error(w, "console unavailable", http.StatusInternalServerError)
+		return
+	}
+	authenticated := s.authenticatedBySession(r)
+
 	if r.URL.Path == "/" || r.URL.Path == "/admin" {
-		http.Redirect(w, r, "/admin/dashboard", http.StatusFound)
+		http.Redirect(w, r, consoleDefaultRedirect(setup, authenticated), http.StatusFound)
+		return
+	}
+	if r.URL.Path == "/admin/setup" {
+		if setup {
+			http.Redirect(w, r, consoleDefaultRedirect(setup, authenticated), http.StatusFound)
+			return
+		}
+		s.renderConsole(w, consoleViewData{Page: consolePage{Name: "setup", Path: "/admin/setup", Title: "Setup", Script: "auth.js"}, AuthMode: "setup"})
+		return
+	}
+	if r.URL.Path == "/admin/login" {
+		if !setup {
+			http.Redirect(w, r, "/admin/setup", http.StatusFound)
+			return
+		}
+		if authenticated {
+			http.Redirect(w, r, "/admin/dashboard", http.StatusFound)
+			return
+		}
+		s.renderConsole(w, consoleViewData{Page: consolePage{Name: "login", Path: "/admin/login", Title: "Login", Script: "auth.js"}, AuthMode: "login"})
 		return
 	}
 	page, ok := consolePageForPath(r.URL.Path)
@@ -76,9 +106,21 @@ func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !setup {
+		http.Redirect(w, r, "/admin/setup", http.StatusFound)
+		return
+	}
+	if !authenticated {
+		http.Redirect(w, r, "/admin/login", http.StatusFound)
+		return
+	}
+	s.renderConsole(w, consoleDataForPage(page, true))
+}
+
+func (s *Server) renderConsole(w http.ResponseWriter, data consoleViewData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	if err := consoleTemplate.ExecuteTemplate(w, "index.html", consoleDataForPage(page)); err != nil {
+	if err := consoleTemplate.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "console template render failed", http.StatusInternalServerError)
 	}
 }
@@ -124,7 +166,17 @@ func consolePageForPath(requestPath string) (consolePage, bool) {
 	return consolePage{}, false
 }
 
-func consoleDataForPage(page consolePage) consoleViewData {
+func consoleDefaultRedirect(setup bool, authenticated bool) string {
+	if !setup {
+		return "/admin/setup"
+	}
+	if authenticated {
+		return "/admin/dashboard"
+	}
+	return "/admin/login"
+}
+
+func consoleDataForPage(page consolePage, authenticated bool) consoleViewData {
 	nav := make([]consoleNavItem, 0, len(consolePages))
 	for _, item := range consolePages {
 		nav = append(nav, consoleNavItem{
@@ -134,7 +186,7 @@ func consoleDataForPage(page consolePage) consoleViewData {
 			Current: item.Name == page.Name,
 		})
 	}
-	return consoleViewData{Page: page, Nav: nav}
+	return consoleViewData{Page: page, Nav: nav, Authenticated: authenticated}
 }
 
 func mustSubFS(fsys fs.FS, dir string) fs.FS {

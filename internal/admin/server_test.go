@@ -41,7 +41,7 @@ func TestStatusBeforeSetup(t *testing.T) {
 	}
 }
 
-func TestConsoleRootRedirectsToDashboard(t *testing.T) {
+func TestConsoleRootRedirectsToSetupBeforeSetup(t *testing.T) {
 	server := newTestServer()
 
 	res := httptest.NewRecorder()
@@ -51,8 +51,8 @@ func TestConsoleRootRedirectsToDashboard(t *testing.T) {
 	if res.Code != http.StatusFound {
 		t.Fatalf("status code = %d, want %d", res.Code, http.StatusFound)
 	}
-	if got := res.Header().Get("Location"); got != "/admin/dashboard" {
-		t.Fatalf("location = %q, want /admin/dashboard", got)
+	if got := res.Header().Get("Location"); got != "/admin/setup" {
+		t.Fatalf("location = %q, want /admin/setup", got)
 	}
 }
 
