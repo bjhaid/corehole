@@ -185,8 +185,8 @@ With `blocking.response: nxdomain`, the response should be `NXDOMAIN`. With
 ## Release Builds
 
 Release binaries are built with [GoReleaser](https://goreleaser.com/). The
-configuration emits archives for common Linux, macOS, and Windows targets,
-including `amd64`, `arm64`, and Linux ARM variants.
+configuration emits archives for common Linux, FreeBSD, macOS, and Windows
+targets, including `amd64`, `arm64`, and Linux ARM variants.
 
 Build a local snapshot without publishing:
 

@@ -18,6 +18,7 @@ builds:
       - -s -w -X github.com/bjhaid/corehole/internal/app.version={{ .Version }}
     goos:
       - linux
+      - freebsd
       - darwin
       - windows
     goarch:
