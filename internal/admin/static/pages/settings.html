@@ -74,6 +74,26 @@
 
             <article class="panel">
               <div class="panel-header">
+                <h3>Blocking response</h3>
+                <span id="blocking-response-state">--</span>
+              </div>
+              <form id="blocking-response-form" class="control-box blocking-response-form">
+                <div>
+                  <label for="blocking-response-mode">Mode</label>
+                  <select id="blocking-response-mode" name="response">
+                    <option value="null-ip">Null IP</option>
+                    <option value="nxdomain">NXDOMAIN</option>
+                    <option value="refused">REFUSED</option>
+                  </select>
+                  <span class="control-note">Null IP returns 0.0.0.0 for A and :: for AAAA.</span>
+                </div>
+                <button id="blocking-response-save" type="submit">Save response</button>
+              </form>
+              <div id="blocking-response-message" class="status-line blocking-response-message" role="status" aria-live="polite"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
                 <h3>Logging</h3>
                 <span id="logging-state">--</span>
               </div>

@@ -213,6 +213,22 @@ func TestDNSRuntimeReloaderInvokesCoreDNSServerReload(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigApplierUpdatesBlockingResponse(t *testing.T) {
+	cfg := testConfig("corehole.db")
+	cfg.Blocking.Response = coreholedns.BlockingResponseRefused
+	runtime := coreplugin.NewRuntime()
+
+	if runtime.BlockingResponse() != coreholedns.BlockingResponseNullIP {
+		t.Fatalf("initial blocking response = %q, want null-ip", runtime.BlockingResponse())
+	}
+	if err := (runtimeConfigApplier{runtime: runtime}).ApplyRuntimeConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("ApplyRuntimeConfig() error = %v", err)
+	}
+	if runtime.BlockingResponse() != coreholedns.BlockingResponseRefused {
+		t.Fatalf("blocking response = %q, want refused", runtime.BlockingResponse())
+	}
+}
+
 func TestBlockingRuntimeControllerPausePersistsAndUpdatesRuntime(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -59,6 +59,10 @@ type DNSReloader interface {
 	ReloadDNS(ctx context.Context, cfg config.Config) error
 }
 
+type RuntimeConfigApplier interface {
+	ApplyRuntimeConfig(ctx context.Context, cfg config.Config) error
+}
+
 type BlockingController interface {
 	Status(time.Time) BlockingStatus
 	Pause(ctx context.Context, until time.Time) (BlockingStatus, error)
@@ -103,6 +107,16 @@ func WithConfigStoreAndDNSReloader(store config.Store, reloader DNSReloader) Opt
 			return
 		}
 		manager := configStoreManager{store: store, dnsReloader: reloader}
+		s.configSource = manager
+	}
+}
+
+func WithConfigStoreAndRuntime(store config.Store, reloader DNSReloader, runtime RuntimeConfigApplier) Option {
+	return func(s *Server) {
+		if store == nil {
+			return
+		}
+		manager := configStoreManager{store: store, dnsReloader: reloader, runtime: runtime}
 		s.configSource = manager
 	}
 }
@@ -715,6 +729,7 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 type configStoreManager struct {
 	store       config.Store
 	dnsReloader DNSReloader
+	runtime     RuntimeConfigApplier
 }
 
 func (m configStoreManager) Snapshot(ctx context.Context) (ConfigSnapshot, error) {
@@ -744,6 +759,11 @@ func (m configStoreManager) Update(ctx context.Context, req ConfigUpdateRequest)
 	}
 	if err := m.store.Save(ctx, next); err != nil {
 		return ConfigUpdateResult{}, err
+	}
+	if m.runtime != nil {
+		if err := m.runtime.ApplyRuntimeConfig(ctx, next); err != nil {
+			return ConfigUpdateResult{}, err
+		}
 	}
 	if current.Logging.Level != next.Logging.Level || current.Logging.Format != next.Logging.Format {
 		coreholelog.Configure(string(next.Logging.EffectiveLevel()), string(next.Logging.EffectiveFormat()))

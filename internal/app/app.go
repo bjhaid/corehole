@@ -122,7 +122,7 @@ func Serve(ctx context.Context, args []string) error {
 			admin.WithSessionStore(admin.NewSQLiteSessionStore(store.DB())),
 			admin.WithSecureCookie(false),
 			admin.WithConfigSnapshot(adminConfigSnapshot(cfg)),
-			admin.WithConfigStoreAndDNSReloader(cfgStore, dnsRuntimeReloader{server: dnsServer}),
+			admin.WithConfigStoreAndRuntime(cfgStore, dnsRuntimeReloader{server: dnsServer}, runtimeConfigApplier{runtime: runtime}),
 			admin.WithBlockingController(blockingRuntimeController{
 				store:   cfgStore,
 				runtime: runtime,
@@ -181,6 +181,19 @@ func (r dnsRuntimeReloader) ReloadDNS(ctx context.Context, cfg config.Config) er
 		return err
 	}
 	coreplugin.Current().SetCacheEnabled(cfg.DNS.CacheEnabled())
+	return nil
+}
+
+type runtimeConfigApplier struct {
+	runtime *coreplugin.Runtime
+}
+
+func (a runtimeConfigApplier) ApplyRuntimeConfig(_ context.Context, cfg config.Config) error {
+	runtime := a.runtime
+	if runtime == nil {
+		runtime = coreplugin.Current()
+	}
+	runtime.SetBlockingResponse(cfg.Blocking.Response)
 	return nil
 }
 

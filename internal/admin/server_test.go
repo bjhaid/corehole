@@ -1146,6 +1146,40 @@ func TestConfigUpdateDNSSECReloadsImmediately(t *testing.T) {
 	}
 }
 
+func TestConfigUpdateBlockingResponseAppliesImmediately(t *testing.T) {
+	initial := config.Default()
+	store := &fakeConfigStore{cfg: initial}
+	applier := &fakeRuntimeConfigApplier{}
+	server := newTestServer(WithConfigStoreAndRuntime(store, nil, applier))
+	cookie := setupSession(t, server)
+
+	res := putJSON(t, server, "/api/config", map[string]any{
+		"blocking": map[string]any{
+			"response": "refused",
+		},
+	}, cookie)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d: %s", res.Code, http.StatusOK, res.Body.String())
+	}
+
+	body := decodeResponse[configUpdateResponse](t, res)
+	if body.RestartRequired {
+		t.Fatal("restart_required = true, want false")
+	}
+	if body.Config.BlockingResponse != "refused" {
+		t.Fatalf("blocking_response = %q, want refused", body.Config.BlockingResponse)
+	}
+	if applier.applyCount != 1 {
+		t.Fatalf("applyCount = %d, want 1", applier.applyCount)
+	}
+	if applier.last.Blocking.Response != coreholedns.BlockingResponseRefused {
+		t.Fatalf("runtime blocking response = %q, want refused", applier.last.Blocking.Response)
+	}
+	if store.saveCount != 1 {
+		t.Fatalf("saveCount = %d, want 1", store.saveCount)
+	}
+}
+
 func TestConfigUpdateCacheSettingsReloadImmediately(t *testing.T) {
 	initial := config.Default()
 	store := &fakeConfigStore{cfg: initial}
@@ -1727,6 +1761,17 @@ type fakeDNSReloader struct {
 func (r *fakeDNSReloader) ReloadDNS(_ context.Context, cfg config.Config) error {
 	r.reloadCount++
 	r.last = cfg
+	return nil
+}
+
+type fakeRuntimeConfigApplier struct {
+	applyCount int
+	last       config.Config
+}
+
+func (a *fakeRuntimeConfigApplier) ApplyRuntimeConfig(_ context.Context, cfg config.Config) error {
+	a.applyCount++
+	a.last = cfg
 	return nil
 }
 

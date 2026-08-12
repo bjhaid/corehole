@@ -126,6 +126,13 @@
       align-items: end;
       margin-bottom: 10px;
     }
+    .blocking-response-form {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
     .cache-form {
       display: grid;
       grid-template-columns: repeat(3, minmax(120px, 1fr)) auto;

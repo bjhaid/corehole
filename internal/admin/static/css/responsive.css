@@ -96,6 +96,7 @@
       .client-form-grid,
       .group-form-grid,
       .cache-form,
+      .blocking-response-form,
       .logging-form,
       .upstream-form {
         grid-template-columns: 1fr;

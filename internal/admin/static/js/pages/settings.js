@@ -25,6 +25,10 @@ function fields() {
     cachePrefetchDuration: required("#cache-prefetch-duration"),
     cachePrefetchPercent: required("#cache-prefetch-percent"),
     cacheMessage: required("#cache-message"),
+    blockingResponseState: required("#blocking-response-state"),
+    blockingResponseForm: required("#blocking-response-form"),
+    blockingResponseMode: required("#blocking-response-mode"),
+    blockingResponseMessage: required("#blocking-response-message"),
     loggingState: required("#logging-state"),
     loggingForm: required("#logging-form"),
     loggingLevel: required("#logging-level"),
@@ -108,6 +112,11 @@ initAdminPage({
       target.loggingMessage.classList.toggle("error", Boolean(isError));
     }
 
+    function setBlockingResponseMessage(text, isError) {
+      target.blockingResponseMessage.textContent = text || "";
+      target.blockingResponseMessage.classList.toggle("error", Boolean(isError));
+    }
+
     function setAPIKeyMessage(text, isError) {
       target.apiKeySecret.textContent = text || "";
       target.apiKeySecret.classList.toggle("error", Boolean(isError));
@@ -161,6 +170,15 @@ initAdminPage({
       setFormDisabled(target.cacheForm, !configUpdateAvailable);
     }
 
+    function renderBlockingResponse(data) {
+      const response = String(pick(data, ["blocking_response", "blockingResponse", "blocking.response"]) || "null-ip").toLowerCase();
+      target.blockingResponseMode.value = ["null-ip", "nxdomain", "refused"].includes(response) ? response : "null-ip";
+      target.blockingResponseState.textContent = target.blockingResponseMode.value === "null-ip"
+        ? "0.0.0.0 / ::"
+        : target.blockingResponseMode.value.toUpperCase();
+      setFormDisabled(target.blockingResponseForm, !configUpdateAvailable);
+    }
+
     function renderLogging(data) {
       const logging = pick(data, ["logging"]) || {};
       const level = String(pick(logging, ["level"]) || "info").toLowerCase();
@@ -183,6 +201,7 @@ initAdminPage({
         setFormDisabled(target.upstreamForm, true);
         setFormDisabled(target.dnssecForm, true);
         setFormDisabled(target.cacheForm, true);
+        setFormDisabled(target.blockingResponseForm, true);
         setFormDisabled(target.loggingForm, true);
         return;
       }
@@ -201,6 +220,7 @@ initAdminPage({
       setFormDisabled(target.upstreamForm, !configUpdateAvailable);
       renderDNSSEC(data);
       renderCache(data);
+      renderBlockingResponse(data);
       renderLogging(data);
     }
 
@@ -369,6 +389,32 @@ initAdminPage({
       }
     }
 
+    async function saveBlockingResponse(event) {
+      event.preventDefault();
+      setFormDisabled(target.blockingResponseForm, true);
+      setBlockingResponseMessage("Saving blocking response...");
+      try {
+        const result = await fetchJSON("/api/config", {
+          method: "PUT",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({blocking: {response: target.blockingResponseMode.value}})
+        });
+        renderConfig({ok: true, data: result.config || {}});
+        const status = result.restart_required
+          ? "Blocking response saved. Restart required for all changes."
+          : "Blocking response applied.";
+        setBlockingResponseMessage(status, false);
+        setUpdated(status);
+      } catch (err) {
+        if (err.message === "config_update_unavailable") {
+          configUpdateAvailable = false;
+        }
+        setBlockingResponseMessage("Blocking response update failed: " + err.message, true);
+      } finally {
+        setFormDisabled(target.blockingResponseForm, !configUpdateAvailable);
+      }
+    }
+
     async function saveLogging(event) {
       event.preventDefault();
       setFormDisabled(target.loggingForm, true);
@@ -519,6 +565,7 @@ initAdminPage({
 
     on(target.dnssecForm, "submit", saveDNSSEC);
     on(target.cacheForm, "submit", saveCache);
+    on(target.blockingResponseForm, "submit", saveBlockingResponse);
     on(target.loggingForm, "submit", saveLogging);
     on(target.upstreamForm, "submit", submitUpstream);
     on(target.upstreamCancel, "click", () => {
