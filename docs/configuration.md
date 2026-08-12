@@ -55,7 +55,7 @@ config source and active blocklist count.
 | `dns.conditional_forwarding.tls_server_name` | string | `""` | Must not contain whitespace or braces | Optional TLS server name for a TLS conditional forwarding resolver. |
 | `admin.listen` | string | `"127.0.0.1:8080"` | Any non-empty TCP listen address accepted by Go `net.Listen`, such as `"127.0.0.1:8080"` or `"0.0.0.0:8080"` | Address for the admin console and admin API. Unlike `dns.listen`, the host is honored. |
 | `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | SQLite database path. The parent directory is created if needed. The database stores audit events, all-time audit action counters, admin users, and persisted app config. |
-| `blocking.response` | string | `"nxdomain"` | `"nxdomain"`, `"null-ip"`, or `"refused"` | DNS response mode for blocked queries. `nxdomain` returns NXDOMAIN. `null-ip` returns `0.0.0.0` for A queries and `::` for AAAA queries, and NXDOMAIN for other query types. `refused` returns REFUSED. |
+| `blocking.response` | string | `"null-ip"` | `"nxdomain"`, `"null-ip"`, or `"refused"` | DNS response mode for blocked queries. `null-ip` returns `0.0.0.0` for A queries and `::` for AAAA queries, and NXDOMAIN for other query types. `nxdomain` returns NXDOMAIN. `refused` returns REFUSED. |
 | `blocking.bundled` | boolean | `true` | `true` or `false` | Enables or disables the embedded seed blocklist from `internal/blocklist/seed.txt`. When enabled, bundled entries are combined with entries loaded from `blocking.blocklists`. |
 | `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
 | `blocking.pause_until` | string | `""` | Empty or RFC3339 timestamp | Optional end time for a timed pause. Empty with `blocking.paused: true` means pause indefinitely. Expired timestamps are ignored by the DNS runtime. |
@@ -255,7 +255,7 @@ admin:
 storage:
   path: "./corehole.db"
 blocking:
-  response: nxdomain
+  response: null-ip
   bundled: true
   blocklists:
     - ./blocklist.txt

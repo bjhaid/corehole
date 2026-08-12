@@ -666,6 +666,7 @@ func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 			CachePrefetchDuration: defaultConfig.DNS.CachePrefetchDuration,
 			CachePrefetchPercent:  defaultConfig.DNS.CachePrefetchPercent,
 			Rewrites:              []config.RewriteRule{},
+			BlockingResponse:      string(defaultConfig.Blocking.Response),
 			BlockingBundled:       defaultConfig.Blocking.Bundled,
 			Logging:               loggingSnapshotFromConfig(defaultConfig.Logging),
 			DNSSEC:                DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},

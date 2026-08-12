@@ -199,7 +199,7 @@ func NewRuntime() *Runtime {
 	rt := &Runtime{}
 	rt.SetDecider(AllowAll{})
 	rt.SetAudit(coreholeaudit.NoopSink{})
-	rt.SetBlockingResponse(coreholedns.BlockingResponseNXDOMAIN)
+	rt.SetBlockingResponse(coreholedns.BlockingResponseNullIP)
 	rt.SetLocalResolver(nil)
 	rt.ResumeBlocking()
 	rt.SetCacheEnabled(false)
@@ -233,7 +233,7 @@ func (r *Runtime) Audit() coreholeaudit.Sink {
 
 func (r *Runtime) SetBlockingResponse(mode coreholedns.BlockingResponse) {
 	if mode == "" {
-		mode = coreholedns.BlockingResponseNXDOMAIN
+		mode = coreholedns.BlockingResponseNullIP
 	}
 	r.mode.Store(mode)
 }

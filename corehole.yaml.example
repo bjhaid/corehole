@@ -18,7 +18,7 @@ admin:
 storage:
   path: "./corehole.db"
 blocking:
-  response: nxdomain
+  response: null-ip
   bundled: true
   blocklists: []
 logging:

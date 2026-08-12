@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bjhaid/corehole/internal/blocklist"
+	coreholedns "github.com/bjhaid/corehole/internal/dns"
 )
 
 func TestDefaultEnablesBundledBlocking(t *testing.T) {
@@ -13,6 +14,9 @@ func TestDefaultEnablesBundledBlocking(t *testing.T) {
 
 	if !cfg.Blocking.Bundled {
 		t.Fatal("default blocking.bundled = false, want true")
+	}
+	if cfg.Blocking.Response != coreholedns.BlockingResponseNullIP {
+		t.Fatalf("default blocking.response = %q, want null-ip", cfg.Blocking.Response)
 	}
 }
 

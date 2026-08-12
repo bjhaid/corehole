@@ -44,6 +44,45 @@ func TestHandlerBlocksCurrentRuntimeDeciderWithNXDOMAIN(t *testing.T) {
 	}
 }
 
+func TestHandlerBlocksCurrentRuntimeDeciderWithDefaultNullIP(t *testing.T) {
+	runtime := Current()
+	runtime.SetDecider(blockAdzerk{})
+	runtime.SetAudit(coreholeaudit.NoopSink{})
+	runtime.SetBlockingResponse("")
+	runtime.SetLocalResolver(nil)
+	t.Cleanup(func() {
+		runtime.SetDecider(AllowAll{})
+		runtime.SetAudit(coreholeaudit.NoopSink{})
+		runtime.SetBlockingResponse(coreholedns.BlockingResponseNullIP)
+		runtime.SetLocalResolver(nil)
+	})
+
+	req := new(dns.Msg)
+	req.SetQuestion("adzerk.com.", dns.TypeA)
+	w := &recordingResponseWriter{remoteAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53000}}
+
+	rcode, err := Handler{}.ServeDNS(context.Background(), w, req)
+	if err != nil {
+		t.Fatalf("ServeDNS() error = %v", err)
+	}
+	if rcode != dns.RcodeSuccess {
+		t.Fatalf("ServeDNS() rcode = %s, want NOERROR", dns.RcodeToString[rcode])
+	}
+	if w.msg == nil {
+		t.Fatal("ServeDNS() did not write a response")
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1", len(w.msg.Answer))
+	}
+	answer, ok := w.msg.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("answer type = %T, want *dns.A", w.msg.Answer[0])
+	}
+	if !answer.A.Equal(net.IPv4(0, 0, 0, 0)) {
+		t.Fatalf("answer A = %s, want 0.0.0.0", answer.A)
+	}
+}
+
 func TestHandlerAuditsForwardDiagnosticsFromMetadata(t *testing.T) {
 	runtime := Current()
 	sink := &recordingAuditSink{}

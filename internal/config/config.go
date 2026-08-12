@@ -148,7 +148,7 @@ func Default() Config {
 			Path: "corehole.db",
 		},
 		Blocking: BlockingConfig{
-			Response: coreholedns.BlockingResponseNXDOMAIN,
+			Response: coreholedns.BlockingResponseNullIP,
 			Bundled:  true,
 		},
 		Logging: LoggingConfig{

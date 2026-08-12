@@ -42,7 +42,7 @@ The built-in defaults are enough for a first run:
 - Admin console: `http://127.0.0.1:8080`
 - Upstream resolver: Cloudflare at `1.1.1.1:53`
 - SQLite storage: `./corehole.db`
-- Blocking: bundled seed blocklist enabled, blocked responses return `NXDOMAIN`
+- Blocking: bundled seed blocklist enabled, blocked A queries return `0.0.0.0`
 - DNS cache: 3600 second successful-response TTL cap, 30 second denial TTL cap,
   32,768 successful-response entries, 4,096 denial/failure entries, and bounded
   prefetch for popular cache entries
@@ -178,9 +178,9 @@ Query the custom blocked domain:
 dig @127.0.0.1 custom-blocked.example A
 ```
 
-With `blocking.response: nxdomain`, the response should be `NXDOMAIN`. With
-`null-ip`, A queries return `0.0.0.0` and AAAA queries return `::`. With
-`refused`, blocked queries return `REFUSED`.
+By default, A queries return `0.0.0.0` and AAAA queries return `::` for blocked
+domains. With `blocking.response: nxdomain`, blocked queries return `NXDOMAIN`.
+With `refused`, blocked queries return `REFUSED`.
 
 ## Release Builds
 
