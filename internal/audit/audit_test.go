@@ -444,6 +444,9 @@ func TestCleanupExpiredUsesConfiguredRetention(t *testing.T) {
 		t.Fatalf("insertBatch() error = %v", err)
 	}
 
+	if err := SetSettings(ctx, store.DB(), Settings{RetentionDuration: 0}); err != nil {
+		t.Fatalf("SetSettings() disabled error = %v", err)
+	}
 	deleted, err := CleanupExpired(ctx, store.DB(), now)
 	if err != nil {
 		t.Fatalf("CleanupExpired() with disabled retention error = %v", err)
@@ -477,6 +480,132 @@ func TestCleanupExpiredUsesConfiguredRetention(t *testing.T) {
 	}
 	if totals.TotalQueries != 2 || totals.BlockedQueries != 2 {
 		t.Fatalf("totals after cleanup = %#v, want all-time source total retained", totals)
+	}
+}
+
+func TestDefaultSettingsUseBoundedRetention(t *testing.T) {
+	settings := DefaultSettings()
+	if settings.RetentionDuration != DefaultRetentionDuration {
+		t.Fatalf("default retention = %s, want %s", settings.RetentionDuration, DefaultRetentionDuration)
+	}
+}
+
+func TestCopyLegacyMetadataCopiesSettingsAndCountersWithoutEvents(t *testing.T) {
+	ctx := context.Background()
+	legacyStore := openTestStore(t, ctx)
+	defer closeStore(t, ctx, legacyStore)
+	auditStore, err := storage.OpenAudit(ctx, filepath.Join(t.TempDir(), "corehole-audit.db"))
+	if err != nil {
+		t.Fatalf("OpenAudit() error = %v", err)
+	}
+	defer closeStore(t, ctx, auditStore)
+
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		testEvent(now, "blocked.example."),
+		func() Event {
+			event := testEvent(now.Add(time.Second), "allowed.example.")
+			event.Action = coredns.ActionAllow
+			return event
+		}(),
+	}
+	if err := insertBatch(ctx, legacyStore.DB(), events); err != nil {
+		t.Fatalf("insertBatch() error = %v", err)
+	}
+	if err := SetSettings(ctx, legacyStore.DB(), Settings{PrivacyLevel: PrivacyLevelHideClient}); err != nil {
+		t.Fatalf("SetSettings() error = %v", err)
+	}
+
+	if err := CopyLegacyMetadata(ctx, legacyStore.DB(), auditStore.DB()); err != nil {
+		t.Fatalf("CopyLegacyMetadata() error = %v", err)
+	}
+
+	settings, err := SettingsFromDB(ctx, auditStore.DB())
+	if err != nil {
+		t.Fatalf("SettingsFromDB() error = %v", err)
+	}
+	if settings.RetentionDuration != DefaultRetentionDuration || settings.PrivacyLevel != PrivacyLevelHideClient {
+		t.Fatalf("copied settings = %#v, want bounded retention and copied privacy", settings)
+	}
+	totals, err := QueryTotals(ctx, auditStore.DB())
+	if err != nil {
+		t.Fatalf("QueryTotals() error = %v", err)
+	}
+	if totals.TotalQueries != 2 || totals.AllowedQueries != 1 || totals.BlockedQueries != 1 {
+		t.Fatalf("copied totals = %#v, want 1 allowed and 1 blocked", totals)
+	}
+	var auditEvents int
+	if err := auditStore.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_events").Scan(&auditEvents); err != nil {
+		t.Fatalf("query audit_events count: %v", err)
+	}
+	if auditEvents != 0 {
+		t.Fatalf("copied raw audit events = %d, want 0", auditEvents)
+	}
+}
+
+func TestCleanupOlderThanDeletesInBatches(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	defer closeStore(t, ctx, store)
+
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	events := make([]Event, 0, cleanupBatchSize+7)
+	for i := 0; i < cleanupBatchSize+7; i++ {
+		events = append(events, testEvent(now.Add(-48*time.Hour), "old.example."))
+	}
+	events = append(events, testEvent(now, "new.example."))
+	if err := insertBatch(ctx, store.DB(), events); err != nil {
+		t.Fatalf("insertBatch() error = %v", err)
+	}
+
+	deleted, err := CleanupOlderThan(ctx, store.DB(), 24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("CleanupOlderThan() error = %v", err)
+	}
+	if deleted != int64(cleanupBatchSize+7) {
+		t.Fatalf("deleted = %d, want %d", deleted, cleanupBatchSize+7)
+	}
+
+	remaining, err := RecentEvents(ctx, store.DB(), 10)
+	if err != nil {
+		t.Fatalf("RecentEvents() error = %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].QueryName != "new.example." {
+		t.Fatalf("remaining events = %#v, want new event only", remaining)
+	}
+}
+
+func TestCleanupExpiredBatchDeletesOnlyOneBatch(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	defer closeStore(t, ctx, store)
+
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	if err := SetSettings(ctx, store.DB(), Settings{RetentionDuration: 24 * time.Hour}); err != nil {
+		t.Fatalf("SetSettings() error = %v", err)
+	}
+	events := make([]Event, 0, cleanupBatchSize+1)
+	for i := 0; i < cleanupBatchSize+1; i++ {
+		events = append(events, testEvent(now.Add(-48*time.Hour), "old.example."))
+	}
+	if err := insertBatch(ctx, store.DB(), events); err != nil {
+		t.Fatalf("insertBatch() error = %v", err)
+	}
+
+	deleted, err := CleanupExpiredBatch(ctx, store.DB(), now)
+	if err != nil {
+		t.Fatalf("CleanupExpiredBatch() error = %v", err)
+	}
+	if deleted != int64(cleanupBatchSize) {
+		t.Fatalf("deleted = %d, want one batch of %d", deleted, cleanupBatchSize)
+	}
+
+	remaining, err := RecentEvents(ctx, store.DB(), cleanupBatchSize+1)
+	if err != nil {
+		t.Fatalf("RecentEvents() error = %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("remaining events = %d, want 1", len(remaining))
 	}
 }
 

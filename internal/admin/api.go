@@ -151,6 +151,7 @@ type ConfigSnapshot struct {
 	Logging               LoggingSnapshot
 	Blocklists            []string
 	StoragePath           string
+	AuditStoragePath      string
 }
 
 type ConfigUpdateRequest struct {
@@ -321,6 +322,7 @@ type configResponse struct {
 	BlocklistPaths        []string                      `json:"blocklist_paths"`
 	BlocklistCount        int                           `json:"blocklist_count"`
 	StoragePath           string                        `json:"storage_path"`
+	AuditStoragePath      string                        `json:"audit_storage_path"`
 }
 
 type configUpdateResponse struct {
@@ -686,6 +688,8 @@ func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 			DNSSEC:                DNSSECSnapshot{Enabled: false, Mode: string(config.DNSSECModeOff)},
 			Upstreams:             []UpstreamSnapshot{},
 			Blocklists:            []string{},
+			StoragePath:           defaultConfig.Storage.Path,
+			AuditStoragePath:      defaultConfig.Storage.AuditPath,
 		}, nil
 	}
 	snapshot, err := s.configSource.Snapshot(ctx)
@@ -723,6 +727,7 @@ func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 		BlocklistPaths:        blocklists,
 		BlocklistCount:        len(blocklists),
 		StoragePath:           snapshot.StoragePath,
+		AuditStoragePath:      snapshot.AuditStoragePath,
 	}
 }
 
@@ -965,6 +970,7 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 		Logging:            loggingSnapshotFromConfig(cfg.Logging),
 		Blocklists:         cloneStrings(cfg.Blocking.Blocklists),
 		StoragePath:        cfg.Storage.Path,
+		AuditStoragePath:   cfg.Storage.AuditPath,
 	}
 }
 

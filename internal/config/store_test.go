@@ -104,6 +104,9 @@ VALUES (1, ?, datetime('now'))`,
 	if loaded.DNS.CacheEnabled() {
 		t.Fatalf("cache enabled = true, want legacy cache_ttl: 0 to disable cache: %#v", loaded.DNS)
 	}
+	if loaded.Storage.AuditPath != "corehole-audit.db" {
+		t.Fatalf("storage.audit_path = %q, want derived legacy audit path", loaded.Storage.AuditPath)
+	}
 }
 
 func TestInitializeStoreKeepsExistingConfig(t *testing.T) {

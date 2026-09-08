@@ -17,6 +17,7 @@ admin:
   listen: "127.0.0.1:8080"
 storage:
   path: "./corehole.db"
+  audit_path: "./corehole-audit.db"
 blocking:
   response: null-ip
   bundled: true

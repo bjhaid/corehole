@@ -108,14 +108,15 @@ func (NoopSink) Record(context.Context, Event) {}
 func (NoopSink) Close(context.Context) error { return nil }
 
 type SQLiteSink struct {
-	db            *sql.DB
-	events        chan Event
-	done          chan struct{}
-	stopped       chan struct{}
-	batchSize     int
-	flushInterval time.Duration
-	dropped       atomic.Uint64
-	closed        atomic.Bool
+	db              *sql.DB
+	events          chan Event
+	done            chan struct{}
+	stopped         chan struct{}
+	batchSize       int
+	flushInterval   time.Duration
+	cleanupInterval time.Duration
+	dropped         atomic.Uint64
+	closed          atomic.Bool
 
 	errMu sync.Mutex
 	err   error
@@ -147,18 +148,25 @@ func WithFlushInterval(interval time.Duration) SQLiteSinkOption {
 	}
 }
 
+func WithRetentionCleanupInterval(interval time.Duration) SQLiteSinkOption {
+	return func(s *SQLiteSink) {
+		s.cleanupInterval = interval
+	}
+}
+
 func NewSQLiteSink(db *sql.DB, opts ...SQLiteSinkOption) (*SQLiteSink, error) {
 	if db == nil {
 		return nil, errors.New("audit sqlite sink requires a database")
 	}
 
 	sink := &SQLiteSink{
-		db:            db,
-		events:        make(chan Event, 1024),
-		done:          make(chan struct{}),
-		stopped:       make(chan struct{}),
-		batchSize:     100,
-		flushInterval: time.Second,
+		db:              db,
+		events:          make(chan Event, 1024),
+		done:            make(chan struct{}),
+		stopped:         make(chan struct{}),
+		batchSize:       100,
+		flushInterval:   time.Second,
+		cleanupInterval: time.Hour,
 	}
 	for _, opt := range opts {
 		opt(sink)
@@ -214,6 +222,13 @@ func (s *SQLiteSink) run() {
 
 	ticker := time.NewTicker(s.flushInterval)
 	defer ticker.Stop()
+	var cleanupTicker *time.Ticker
+	var cleanupC <-chan time.Time
+	if s.cleanupInterval > 0 {
+		cleanupTicker = time.NewTicker(s.cleanupInterval)
+		defer cleanupTicker.Stop()
+		cleanupC = cleanupTicker.C
+	}
 
 	batch := make([]Event, 0, s.batchSize)
 	flush := func() {
@@ -225,6 +240,11 @@ func (s *SQLiteSink) run() {
 		}
 		batch = batch[:0]
 	}
+	cleanup := func() {
+		if _, err := s.CleanupExpiredBatch(context.Background(), time.Now().UTC()); err != nil {
+			s.setError(err)
+		}
+	}
 
 	for {
 		select {
@@ -235,6 +255,9 @@ func (s *SQLiteSink) run() {
 			}
 		case <-ticker.C:
 			flush()
+		case <-cleanupC:
+			flush()
+			cleanup()
 		case <-s.done:
 			for {
 				select {

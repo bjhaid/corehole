@@ -54,7 +54,8 @@ config source and active blocklist count.
 | `dns.conditional_forwarding.protocol` | string | `""` | `""`, `"udp"`, `"dns"`, `"tcp"`, `"tls"`, or `"https"` | Uses the same CoreDNS target behavior as upstream resolver `protocol`. |
 | `dns.conditional_forwarding.tls_server_name` | string | `""` | Must not contain whitespace or braces | Optional TLS server name for a TLS conditional forwarding resolver. |
 | `admin.listen` | string | `"127.0.0.1:8080"` | Any non-empty TCP listen address accepted by Go `net.Listen`, such as `"127.0.0.1:8080"` or `"0.0.0.0:8080"` | Address for the admin console and admin API. Unlike `dns.listen`, the host is honored. |
-| `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | SQLite database path. The parent directory is created if needed. The database stores audit events, all-time audit action counters, admin users, and persisted app config. |
+| `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | Main SQLite database path. The parent directory is created if needed. The database stores admin users, browser sessions, API keys, persisted app config, blocklist subscriptions, groups, clients, local DNS records, and custom DNS rewrite rules. |
+| `storage.audit_path` | string | `"corehole-audit.db"` | Any non-empty SQLite database path | Audit SQLite database path. The parent directory is created if needed. The database stores detailed query log rows, all-time audit action counters, audit privacy settings, and audit retention settings. If omitted in an older config, corehole derives this path beside `storage.path`, for example `corehole.db` becomes `corehole-audit.db`. |
 | `blocking.response` | string | `"null-ip"` | `"nxdomain"`, `"null-ip"`, or `"refused"` | DNS response mode for blocked queries. `null-ip` returns `0.0.0.0` for A queries and `::` for AAAA queries, and NXDOMAIN for other query types. `nxdomain` returns NXDOMAIN. `refused` returns REFUSED. |
 | `blocking.bundled` | boolean | `true` | `true` or `false` | Enables or disables the embedded seed blocklist from `internal/blocklist/seed.txt`. When enabled, bundled entries are combined with entries loaded from `blocking.blocklists`. |
 | `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
@@ -84,10 +85,22 @@ does not affect a running process. If the configured SQLite database already has
 an `app_config` row, changing YAML also does not affect the next process start
 until the persisted config is updated or removed.
 
-Audit retention cleanup removes old detailed `audit_events` rows only. The
-all-time audit action counters used by dashboard totals are retained across
-cleanup and restarts; they can be rebuilt from remaining `audit_events` rows if
-an operator intentionally needs to reset them.
+Corehole opens separate SQLite databases for configuration/admin data and
+audit/query-history data. This keeps large query-log cleanup and analytics reads
+away from the configuration paths used by the admin console. Existing
+single-database installs are migrated conservatively: new audit writes use
+`storage.audit_path`, legacy audit retention/privacy settings and all-time
+action counters are copied forward, and old raw `audit_events` rows are left in
+`storage.path` instead of being copied at startup.
+
+Audit retention cleanup removes old detailed `audit_events` rows only from the
+audit database. Corehole defaults detailed audit retention to 48 hours and runs
+cleanup automatically in bounded batches while serving. The all-time audit
+action counters used by dashboard totals are retained across cleanup and
+restarts; they can be rebuilt from remaining `audit_events` rows if an operator
+intentionally needs to reset them. SQLite reuses freed pages after cleanup; run
+`VACUUM` during maintenance if you need the database file itself to shrink
+immediately after deleting a large backlog.
 
 Fields read at startup by the running application:
 
@@ -106,8 +119,10 @@ Fields read at startup by the running application:
   changes.
 - `admin.listen`: used before the admin HTTP server starts; restart required
   after YAML changes.
-- `storage.path`: used to open SQLite before admin and DNS services start;
-  restart required after YAML changes.
+- `storage.path`: used to open the main SQLite database before admin and DNS
+  services start; restart required after YAML changes.
+- `storage.audit_path`: used to open the audit SQLite database before admin and
+  DNS services start; restart required after YAML changes.
 - `blocking.response`: copied into the DNS plugin runtime at startup; restart
   required after YAML changes.
 - `blocking.paused` and `blocking.pause_until`: copied into the DNS plugin
@@ -149,13 +164,13 @@ table:
 - `logging.level`
 - `logging.format`
 
-That update path preserves `storage.path`. DNS resolver/cache/DNSSEC,
-conditional forwarding, and CoreDNS-relevant `logging.level` changes can apply through DNS hot
-reload when the DNS listen address is unchanged and the active update manager
-has a DNS reloader. If hot reload is unavailable, if the DNS listen address
-changes, or if a change touches `admin.listen`, `logging.level`,
-`logging.format`, or configured blocklist paths, the response reports
-`restart_required: true`.
+That update path preserves `storage.path` and `storage.audit_path`. DNS
+resolver/cache/DNSSEC, conditional forwarding, and CoreDNS-relevant
+`logging.level` changes can apply through DNS hot reload when the DNS listen
+address is unchanged and the active update manager has a DNS reloader. If hot
+reload is unavailable, if the DNS listen address changes, or if a change touches
+`admin.listen`, `logging.level`, `logging.format`, or configured blocklist
+paths, the response reports `restart_required: true`.
 
 To force a later startup to seed active config from YAML again, stop corehole and
 delete the persisted app config row from the selected database:
@@ -172,6 +187,7 @@ Startup validation fails when:
 - `dns.listen` is empty.
 - `admin.listen` is empty.
 - `storage.path` is empty.
+- `storage.audit_path` is empty.
 - no resolver is enabled.
 - an enabled resolver has an empty `address`.
 - an enabled resolver uses an unsupported `protocol`.
@@ -254,6 +270,7 @@ admin:
   listen: "127.0.0.1:8080"
 storage:
   path: "./corehole.db"
+  audit_path: "./corehole-audit.db"
 blocking:
   response: null-ip
   bundled: true
@@ -321,6 +338,7 @@ admin:
   listen: "0.0.0.0:8080"
 storage:
   path: "/var/lib/corehole/corehole.db"
+  audit_path: "/var/lib/corehole/corehole-audit.db"
 blocking:
   response: null-ip
   bundled: true

@@ -811,6 +811,7 @@ func TestConfigPayload(t *testing.T) {
 		},
 		BlockingResponse: "null-ip",
 		StoragePath:      "/var/lib/corehole/corehole.db",
+		AuditStoragePath: "/var/lib/corehole/corehole-audit.db",
 		Logging: LoggingSnapshot{
 			Level:  "debug",
 			Format: "json",
@@ -850,7 +851,8 @@ func TestConfigPayload(t *testing.T) {
 		!body.BlockingBundled ||
 		body.Logging.Level != "debug" ||
 		body.Logging.Format != "json" ||
-		body.StoragePath != "/var/lib/corehole/corehole.db" {
+		body.StoragePath != "/var/lib/corehole/corehole.db" ||
+		body.AuditStoragePath != "/var/lib/corehole/corehole-audit.db" {
 		t.Fatalf("config payload = %#v", body)
 	}
 	if len(body.Upstreams) != 2 {

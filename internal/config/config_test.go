@@ -55,6 +55,9 @@ func TestDefaultDNSListenUsesStandardPort(t *testing.T) {
 	if cfg.Logging.Format != LoggingFormatText {
 		t.Fatalf("default logging.format = %q, want text", cfg.Logging.Format)
 	}
+	if cfg.Storage.Path != "corehole.db" || cfg.Storage.AuditPath != "corehole-audit.db" {
+		t.Fatalf("default storage = %#v, want split main/audit paths", cfg.Storage)
+	}
 }
 
 func TestLoadCanDisableBundledBlocking(t *testing.T) {
@@ -95,6 +98,41 @@ blocking:
 	}
 	if blocklist.BundledDefaultEnabled() {
 		t.Fatal("blocklist bundled default = true, want false")
+	}
+	if cfg.Storage.AuditPath != "./corehole-audit.db" {
+		t.Fatalf("storage.audit_path = %q, want derived ./corehole-audit.db", cfg.Storage.AuditPath)
+	}
+}
+
+func TestLoadDerivesAuditPathBesideCustomStoragePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corehole.yaml")
+	if err := os.WriteFile(path, []byte(`
+dns:
+  listen: ":1053"
+  resolvers:
+    - name: cloudflare
+      address: "1.1.1.1:53"
+      protocol: udp
+      enabled: true
+admin:
+  listen: "127.0.0.1:8080"
+storage:
+  path: "/var/lib/corehole/corehole.db"
+blocking:
+  response: null-ip
+  bundled: true
+  blocklists: []
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Storage.AuditPath != "/var/lib/corehole/corehole-audit.db" {
+		t.Fatalf("storage.audit_path = %q, want adjacent audit db", cfg.Storage.AuditPath)
 	}
 }
 

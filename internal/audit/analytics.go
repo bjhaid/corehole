@@ -17,6 +17,8 @@ const (
 	defaultSummaryTopLimit       = 10
 	defaultSummaryBucketCount    = 24
 	defaultSummaryBucketInterval = time.Hour
+	DefaultRetentionDuration     = 48 * time.Hour
+	cleanupBatchSize             = 5000
 )
 
 type PrivacyLevel int
@@ -89,7 +91,7 @@ type ClientTimeBucket struct {
 }
 
 func DefaultSettings() Settings {
-	return Settings{}
+	return Settings{RetentionDuration: DefaultRetentionDuration}
 }
 
 func (s *SQLiteSink) Settings(ctx context.Context) (Settings, error) {
@@ -102,6 +104,10 @@ func (s *SQLiteSink) SetSettings(ctx context.Context, settings Settings) error {
 
 func (s *SQLiteSink) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
 	return CleanupExpired(ctx, s.db, now)
+}
+
+func (s *SQLiteSink) CleanupExpiredBatch(ctx context.Context, now time.Time) (int64, error) {
+	return CleanupExpiredBatch(ctx, s.db, now)
 }
 
 func (s *SQLiteSink) Summary(ctx context.Context, opts SummaryOptions) (Summary, error) {
@@ -125,6 +131,145 @@ func (s *SQLiteSink) Stats(ctx context.Context) (Stats, error) {
 
 func (s *SQLiteSink) RecentClients(ctx context.Context, limit int) ([]ClientSuggestion, error) {
 	return RecentClients(ctx, s.db, limit)
+}
+
+func CopyLegacyMetadata(ctx context.Context, source *sql.DB, target *sql.DB) error {
+	if source == nil || target == nil || source == target {
+		return nil
+	}
+	if err := copyLegacySettings(ctx, source, target); err != nil {
+		return err
+	}
+	if err := copyLegacyActionTotals(ctx, source, target); err != nil {
+		return err
+	}
+	return nil
+}
+
+func copyLegacySettings(ctx context.Context, source *sql.DB, target *sql.DB) error {
+	exists, err := tableExists(ctx, source, "audit_settings")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	var targetUpdatedAt string
+	if err := target.QueryRowContext(ctx, "SELECT updated_at FROM audit_settings WHERE id = 1").Scan(&targetUpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			targetUpdatedAt = ""
+		} else {
+			return fmt.Errorf("query target audit settings: %w", err)
+		}
+	}
+	if targetUpdatedAt != "" {
+		return nil
+	}
+
+	var (
+		retentionNS int64
+		level       int
+	)
+	err = source.QueryRowContext(ctx, `
+SELECT retention_duration_ns, privacy_level
+FROM audit_settings
+WHERE id = 1`).Scan(&retentionNS, &level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("query legacy audit settings: %w", err)
+	}
+	if retentionNS <= 0 {
+		retentionNS = int64(DefaultRetentionDuration)
+	}
+	if err := SetSettings(ctx, target, Settings{
+		RetentionDuration: time.Duration(retentionNS),
+		PrivacyLevel:      PrivacyLevel(level),
+	}); err != nil {
+		return fmt.Errorf("copy legacy audit settings: %w", err)
+	}
+	return nil
+}
+
+func copyLegacyActionTotals(ctx context.Context, source *sql.DB, target *sql.DB) error {
+	exists, err := tableExists(ctx, source, "audit_action_totals")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	var targetRows int
+	if err := target.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_action_totals").Scan(&targetRows); err != nil {
+		return fmt.Errorf("query target audit action totals: %w", err)
+	}
+	if targetRows > 0 {
+		return nil
+	}
+
+	rows, err := source.QueryContext(ctx, `
+SELECT action, count, updated_at
+FROM audit_action_totals`)
+	if err != nil {
+		return fmt.Errorf("query legacy audit action totals: %w", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	tx, err := target.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin legacy audit total copy: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO audit_action_totals (action, count, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(action) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("prepare legacy audit total copy: %w", err)
+	}
+	defer func() {
+		_ = stmt.Close()
+	}()
+
+	for rows.Next() {
+		var (
+			action    string
+			count     int64
+			updatedAt string
+		)
+		if err := rows.Scan(&action, &count, &updatedAt); err != nil {
+			return fmt.Errorf("scan legacy audit total: %w", err)
+		}
+		if _, err := stmt.ExecContext(ctx, action, count, updatedAt); err != nil {
+			return fmt.Errorf("copy legacy audit total: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read legacy audit totals: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit legacy audit total copy: %w", err)
+	}
+	return nil
+}
+
+func tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM sqlite_master
+WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+		return false, fmt.Errorf("query table %s existence: %w", table, err)
+	}
+	return count > 0, nil
 }
 
 func SettingsFromDB(ctx context.Context, db *sql.DB) (Settings, error) {
@@ -190,7 +335,19 @@ func CleanupExpired(ctx context.Context, db *sql.DB, now time.Time) (int64, erro
 	return CleanupOlderThan(ctx, db, settings.RetentionDuration, now)
 }
 
+func CleanupExpiredBatch(ctx context.Context, db *sql.DB, now time.Time) (int64, error) {
+	settings, err := SettingsFromDB(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	return cleanupOlderThan(ctx, db, settings.RetentionDuration, now, cleanupBatchSize)
+}
+
 func CleanupOlderThan(ctx context.Context, db *sql.DB, maxAge time.Duration, now time.Time) (int64, error) {
+	return cleanupOlderThan(ctx, db, maxAge, now, 0)
+}
+
+func cleanupOlderThan(ctx context.Context, db *sql.DB, maxAge time.Duration, now time.Time, maxRows int) (int64, error) {
 	if db == nil {
 		return 0, errors.New("audit cleanup requires a database")
 	}
@@ -202,15 +359,35 @@ func CleanupOlderThan(ctx context.Context, db *sql.DB, maxAge time.Duration, now
 	}
 
 	cutoff := now.UTC().Add(-maxAge).Format(time.RFC3339Nano)
-	result, err := db.ExecContext(ctx, "DELETE FROM audit_events WHERE timestamp < ?", cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("cleanup audit events: %w", err)
+	var deleted int64
+	for {
+		result, err := db.ExecContext(ctx, `
+DELETE FROM audit_events
+WHERE id IN (
+	SELECT id
+	FROM audit_events
+	WHERE timestamp < ?
+	ORDER BY timestamp ASC, id ASC
+	LIMIT ?
+)`, cutoff, cleanupBatchSize)
+		if err != nil {
+			return deleted, fmt.Errorf("cleanup audit events: %w", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return deleted, fmt.Errorf("count cleaned audit events: %w", err)
+		}
+		deleted += rows
+		if maxRows > 0 {
+			return deleted, nil
+		}
+		if rows < cleanupBatchSize {
+			return deleted, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
 	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("count cleaned audit events: %w", err)
-	}
-	return deleted, nil
 }
 
 func QueryTotals(ctx context.Context, db *sql.DB) (Totals, error) {
@@ -340,7 +517,7 @@ LIMIT ?`, opts.Since, opts.TopLimit)
 	if err != nil {
 		return Summary{}, err
 	}
-	clientBuckets, err := clientTimeBuckets(ctx, db, opts, topClients)
+	clientBuckets, err := clientTimeBuckets(ctx, db, opts, topClients, buckets)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -582,10 +759,16 @@ func timeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions) ([]TimeBu
 		}
 	}
 
+	intervalSeconds := int64(opts.BucketInterval / time.Second)
+	if intervalSeconds <= 0 {
+		intervalSeconds = int64(defaultSummaryBucketInterval / time.Second)
+	}
+
 	rows, err := db.QueryContext(ctx, `
-SELECT timestamp, action
+SELECT CAST((strftime('%s', timestamp) - ?) / ? AS INTEGER) AS bucket_index, action, COUNT(*)
 FROM audit_events
-WHERE timestamp >= ? AND timestamp < ?`, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+WHERE timestamp >= ? AND timestamp < ?
+GROUP BY bucket_index, action`, start.Unix(), intervalSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, fmt.Errorf("query time buckets: %w", err)
 	}
@@ -594,25 +777,23 @@ WHERE timestamp >= ? AND timestamp < ?`, start.Format(time.RFC3339Nano), end.For
 	}()
 
 	for rows.Next() {
-		var timestamp string
-		var action string
-		if err := rows.Scan(&timestamp, &action); err != nil {
+		var (
+			index  int
+			action string
+			count  int
+		)
+		if err := rows.Scan(&index, &action, &count); err != nil {
 			return nil, fmt.Errorf("scan time bucket event: %w", err)
 		}
-		eventTime, err := time.Parse(time.RFC3339Nano, timestamp)
-		if err != nil {
-			return nil, fmt.Errorf("parse time bucket timestamp: %w", err)
-		}
-		index := int(eventTime.UTC().Sub(start) / opts.BucketInterval)
 		if index < 0 || index >= len(buckets) {
 			continue
 		}
-		buckets[index].Total++
+		buckets[index].Total += count
 		switch action {
 		case "allow":
-			buckets[index].Allowed++
+			buckets[index].Allowed += count
 		case "block":
-			buckets[index].Blocked++
+			buckets[index].Blocked += count
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -621,15 +802,20 @@ WHERE timestamp >= ? AND timestamp < ?`, start.Format(time.RFC3339Nano), end.For
 	return buckets, nil
 }
 
-func clientTimeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions, topClients []NamedTotal) ([]ClientTimeBucket, error) {
+func clientTimeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions, topClients []NamedTotal, bucketTotals []TimeBucket) ([]ClientTimeBucket, error) {
 	end := opts.Now.Truncate(opts.BucketInterval).Add(opts.BucketInterval)
 	start := end.Add(-time.Duration(opts.BucketCount) * opts.BucketInterval)
 	buckets := make([]ClientTimeBucket, opts.BucketCount)
 	for i := range buckets {
 		bucketStart := start.Add(time.Duration(i) * opts.BucketInterval)
+		total := 0
+		if i < len(bucketTotals) {
+			total = bucketTotals[i].Total
+		}
 		buckets[i] = ClientTimeBucket{
 			Start: bucketStart,
 			End:   bucketStart.Add(opts.BucketInterval),
+			Total: total,
 		}
 	}
 	if len(topClients) == 0 {
@@ -651,10 +837,22 @@ func clientTimeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions, top
 		counts[i] = make([]int, len(topClients))
 	}
 
-	rows, err := db.QueryContext(ctx, `
-SELECT timestamp, client_ip
+	intervalSeconds := int64(opts.BucketInterval / time.Second)
+	if intervalSeconds <= 0 {
+		intervalSeconds = int64(defaultSummaryBucketInterval / time.Second)
+	}
+	placeholders := make([]string, 0, len(topClients))
+	args := []any{start.Unix(), intervalSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano)}
+	for _, client := range topClients {
+		placeholders = append(placeholders, "?")
+		args = append(args, client.Name)
+	}
+
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
+SELECT CAST((strftime('%%s', timestamp) - ?) / ? AS INTEGER) AS bucket_index, client_ip, COUNT(*)
 FROM audit_events
-WHERE timestamp >= ? AND timestamp < ? AND client_ip <> ''`, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+WHERE timestamp >= ? AND timestamp < ? AND client_ip IN (%s)
+GROUP BY bucket_index, client_ip`, joinSQLPlaceholders(placeholders)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query client time buckets: %w", err)
 	}
@@ -663,25 +861,22 @@ WHERE timestamp >= ? AND timestamp < ? AND client_ip <> ''`, start.Format(time.R
 	}()
 
 	for rows.Next() {
-		var timestamp string
-		var clientIP string
-		if err := rows.Scan(&timestamp, &clientIP); err != nil {
+		var (
+			bucketIndex int
+			clientIP    string
+			count       int
+		)
+		if err := rows.Scan(&bucketIndex, &clientIP, &count); err != nil {
 			return nil, fmt.Errorf("scan client time bucket event: %w", err)
 		}
-		eventTime, err := time.Parse(time.RFC3339Nano, timestamp)
-		if err != nil {
-			return nil, fmt.Errorf("parse client time bucket timestamp: %w", err)
-		}
-		bucketIndex := int(eventTime.UTC().Sub(start) / opts.BucketInterval)
 		if bucketIndex < 0 || bucketIndex >= len(buckets) {
 			continue
 		}
-		buckets[bucketIndex].Total++
 		clientIndex, ok := clientIndexes[clientIP]
 		if !ok {
 			continue
 		}
-		counts[bucketIndex][clientIndex]++
+		counts[bucketIndex][clientIndex] += count
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read client time bucket events: %w", err)
@@ -701,6 +896,17 @@ WHERE timestamp >= ? AND timestamp < ? AND client_ip <> ''`, start.Format(time.R
 		buckets[bucketIndex].Clients = clients
 	}
 	return buckets, nil
+}
+
+func joinSQLPlaceholders(placeholders []string) string {
+	result := ""
+	for i, placeholder := range placeholders {
+		if i > 0 {
+			result += ","
+		}
+		result += placeholder
+	}
+	return result
 }
 
 func validateSettings(settings Settings) error {

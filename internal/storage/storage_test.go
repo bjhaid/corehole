@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
@@ -55,7 +56,7 @@ func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 	assertTableExists(t, ctx, store, "api_keys")
 	assertTableExists(t, ctx, store, "admin_sessions")
 
-	for _, version := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
+	for _, version := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13} {
 		var migrations int
 		if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&migrations); err != nil {
 			t.Fatalf("query schema_migrations version %d: %v", version, err)
@@ -100,6 +101,89 @@ func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 		"forward_error",
 	} {
 		assertColumnExists(t, ctx, store, "audit_events", column)
+	}
+}
+
+func TestOpenMainAppliesOnlyMainMigrations(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corehole.db")
+
+	store, err := OpenMain(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenMain() error = %v", err)
+	}
+	defer func() {
+		if err := store.Close(ctx); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	for _, table := range []string{
+		"schema_migrations",
+		"admin_users",
+		"app_config",
+		"local_dns_records",
+		"filter_lists",
+		"filter_list_entries",
+		"filter_rules",
+		"filter_clients",
+		"filter_groups",
+		"filter_client_groups",
+		"filter_list_groups",
+		"filter_rule_groups",
+		"api_keys",
+		"admin_sessions",
+	} {
+		assertTableExists(t, ctx, store, table)
+	}
+	for _, table := range []string{"audit_events", "audit_action_totals", "audit_settings"} {
+		assertTableMissing(t, ctx, store, table)
+	}
+	for _, version := range []int{2, 3, 4, 5, 7, 11} {
+		assertMigrationExists(t, ctx, store, version)
+	}
+	for _, version := range []int{1, 6, 8, 9, 10, 12, 13} {
+		assertMigrationMissing(t, ctx, store, version)
+	}
+}
+
+func TestOpenAuditAppliesOnlyAuditMigrations(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corehole-audit.db")
+
+	store, err := OpenAudit(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenAudit() error = %v", err)
+	}
+	defer func() {
+		if err := store.Close(ctx); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	for _, table := range []string{
+		"schema_migrations",
+		"audit_events",
+		"audit_action_totals",
+		"audit_settings",
+	} {
+		assertTableExists(t, ctx, store, table)
+	}
+	for _, table := range []string{
+		"admin_users",
+		"app_config",
+		"local_dns_records",
+		"filter_lists",
+		"api_keys",
+		"admin_sessions",
+	} {
+		assertTableMissing(t, ctx, store, table)
+	}
+	for _, version := range []int{1, 6, 8, 9, 10, 12, 13} {
+		assertMigrationExists(t, ctx, store, version)
+	}
+	for _, version := range []int{2, 3, 4, 5, 7, 11} {
+		assertMigrationMissing(t, ctx, store, version)
 	}
 }
 
@@ -159,8 +243,8 @@ func TestOpenMigrationsAreIdempotent(t *testing.T) {
 	if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrations); err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if migrations != 12 {
-		t.Fatalf("migration rows = %d, want 12", migrations)
+	if migrations != 13 {
+		t.Fatalf("migration rows = %d, want 13", migrations)
 	}
 }
 
@@ -214,8 +298,35 @@ FROM audit_settings
 WHERE id = 1`).Scan(&retentionNS, &privacyLevel); err != nil {
 		t.Fatalf("query audit_settings: %v", err)
 	}
-	if retentionNS != 0 || privacyLevel != 0 {
-		t.Fatalf("audit settings = retention %d privacy %d, want 0/0", retentionNS, privacyLevel)
+	if retentionNS != int64(48*time.Hour) || privacyLevel != 0 {
+		t.Fatalf("audit settings = retention %d privacy %d, want 48h/0", retentionNS, privacyLevel)
+	}
+}
+
+func TestAuditRetentionMigrationBoundsExistingDisabledRetention(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corehole.db")
+	prepareVersion12AuditSettingsDB(t, ctx, path)
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() {
+		if err := store.Close(ctx); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	var retentionNS int64
+	if err := store.DB().QueryRowContext(ctx, `
+SELECT retention_duration_ns
+FROM audit_settings
+WHERE id = 1`).Scan(&retentionNS); err != nil {
+		t.Fatalf("query audit_settings: %v", err)
+	}
+	if retentionNS != int64(48*time.Hour) {
+		t.Fatalf("audit retention = %d, want 48h", retentionNS)
 	}
 }
 
@@ -258,6 +369,48 @@ WHERE name = 'automation'
 	}
 }
 
+func prepareVersion12AuditSettingsDB(t *testing.T, ctx context.Context, path string) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("close sqlite: %v", err)
+		}
+	}()
+
+	statements := []string{
+		`CREATE TABLE schema_migrations (
+	version INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	applied_at TEXT NOT NULL
+)`,
+		`CREATE TABLE audit_settings (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	retention_duration_ns INTEGER NOT NULL DEFAULT 0 CHECK (retention_duration_ns >= 0),
+	privacy_level INTEGER NOT NULL DEFAULT 0 CHECK (privacy_level >= 0 AND privacy_level <= 2),
+	updated_at TEXT NOT NULL
+)`,
+		`INSERT INTO audit_settings (id, retention_duration_ns, privacy_level, updated_at)
+VALUES (1, 0, 0, '2026-08-10T12:00:00Z')`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare version 12 db: %v", err)
+		}
+	}
+	for version := 1; version <= 12; version++ {
+		if _, err := db.ExecContext(ctx, `
+INSERT INTO schema_migrations (version, name, applied_at)
+VALUES (?, ?, '2026-08-10T12:00:00Z')`, version, "applied"); err != nil {
+			t.Fatalf("insert migration version %d: %v", version, err)
+		}
+	}
+}
+
 func prepareVersion8AuditDB(t *testing.T, ctx context.Context, path string) {
 	t.Helper()
 
@@ -290,6 +443,14 @@ func prepareVersion8AuditDB(t *testing.T, ctx context.Context, path string) {
 	response TEXT NOT NULL DEFAULT '',
 	duration_ns INTEGER NOT NULL DEFAULT 0
 )`,
+		`CREATE TABLE audit_settings (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	retention_duration_ns INTEGER NOT NULL DEFAULT 0 CHECK (retention_duration_ns >= 0),
+	privacy_level INTEGER NOT NULL DEFAULT 0 CHECK (privacy_level >= 0 AND privacy_level <= 2),
+	updated_at TEXT NOT NULL
+)`,
+		`INSERT INTO audit_settings (id, retention_duration_ns, privacy_level, updated_at)
+VALUES (1, 0, 0, '2026-08-10T12:00:00Z')`,
 		`INSERT INTO audit_events (
 	timestamp,
 	client_ip,
@@ -333,6 +494,46 @@ func assertTableExists(t *testing.T, ctx context.Context, store *SQLiteStore, ta
 	}
 	if count != 1 {
 		t.Fatalf("table %s exists count = %d, want 1", table, count)
+	}
+}
+
+func assertTableMissing(t *testing.T, ctx context.Context, store *SQLiteStore, table string) {
+	t.Helper()
+
+	var count int
+	if err := store.DB().QueryRowContext(
+		ctx,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+		table,
+	).Scan(&count); err != nil {
+		t.Fatalf("query sqlite_master for %s: %v", table, err)
+	}
+	if count != 0 {
+		t.Fatalf("table %s exists count = %d, want 0", table, count)
+	}
+}
+
+func assertMigrationExists(t *testing.T, ctx context.Context, store *SQLiteStore, version int) {
+	t.Helper()
+
+	var migrations int
+	if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&migrations); err != nil {
+		t.Fatalf("query schema_migrations version %d: %v", version, err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration version %d rows = %d, want 1", version, migrations)
+	}
+}
+
+func assertMigrationMissing(t *testing.T, ctx context.Context, store *SQLiteStore, version int) {
+	t.Helper()
+
+	var migrations int
+	if err := store.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&migrations); err != nil {
+		t.Fatalf("query schema_migrations version %d: %v", version, err)
+	}
+	if migrations != 0 {
+		t.Fatalf("migration version %d rows = %d, want 0", version, migrations)
 	}
 }
 

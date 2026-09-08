@@ -48,7 +48,7 @@ func Serve(ctx context.Context, args []string) error {
 		return err
 	}
 
-	store, err := storage.Open(ctx, bootstrapCfg.Storage.Path)
+	store, err := storage.OpenMain(ctx, bootstrapCfg.Storage.Path)
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)
 	}
@@ -65,6 +65,19 @@ func Serve(ctx context.Context, args []string) error {
 	}
 	cfg := initResult.Config
 	coreholelog.Configure(string(cfg.Logging.EffectiveLevel()), string(cfg.Logging.EffectiveFormat()))
+
+	auditStore, err := storage.OpenAudit(ctx, cfg.Storage.AuditPath)
+	if err != nil {
+		return fmt.Errorf("audit storage: %w", err)
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = auditStore.Close(closeCtx)
+	}()
+	if err := audit.CopyLegacyMetadata(ctx, store.DB(), auditStore.DB()); err != nil {
+		return fmt.Errorf("audit legacy metadata: %w", err)
+	}
 
 	blocklist.SetBundledDefault(cfg.Blocking.Bundled)
 	runtime := coreplugin.Current()
@@ -84,7 +97,7 @@ func Serve(ctx context.Context, args []string) error {
 	}
 	runtime.SetDecider(blocklistManager)
 
-	auditSink, err := audit.NewSQLiteSink(store.DB())
+	auditSink, err := audit.NewSQLiteSink(auditStore.DB())
 	if err != nil {
 		return fmt.Errorf("audit sink: %w", err)
 	}
@@ -401,7 +414,8 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 			Level:  string(cfg.Logging.EffectiveLevel()),
 			Format: string(cfg.Logging.EffectiveFormat()),
 		},
-		Blocklists:  append([]string(nil), cfg.Blocking.Blocklists...),
-		StoragePath: cfg.Storage.Path,
+		Blocklists:       append([]string(nil), cfg.Blocking.Blocklists...),
+		StoragePath:      cfg.Storage.Path,
+		AuditStoragePath: cfg.Storage.AuditPath,
 	}
 }

@@ -13,6 +13,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const defaultAuditRetentionNS = int64(48 * time.Hour)
+
 type Store interface {
 	Close(context.Context) error
 }
@@ -22,6 +24,18 @@ type SQLiteStore struct {
 }
 
 func Open(ctx context.Context, path string) (*SQLiteStore, error) {
+	return open(ctx, path, allMigrations(), 1)
+}
+
+func OpenMain(ctx context.Context, path string) (*SQLiteStore, error) {
+	return open(ctx, path, mainMigrations(), 4)
+}
+
+func OpenAudit(ctx context.Context, path string) (*SQLiteStore, error) {
+	return open(ctx, path, auditMigrations(), 1)
+}
+
+func open(ctx context.Context, path string, migrations []migration, maxOpenConns int) (*SQLiteStore, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("storage path is required")
 	}
@@ -33,15 +47,18 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	if maxOpenConns <= 0 {
+		maxOpenConns = 1
+	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
 
 	store := &SQLiteStore{db: db}
 	if err := store.configure(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := store.migrate(ctx); err != nil {
+	if err := store.migrate(ctx, migrations); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -81,7 +98,7 @@ func (s *SQLiteStore) configure(ctx context.Context) error {
 	return nil
 }
 
-func (s *SQLiteStore) migrate(ctx context.Context) error {
+func (s *SQLiteStore) migrate(ctx context.Context, migrations []migration) error {
 	if _, err := s.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	version INTEGER PRIMARY KEY,
@@ -91,7 +108,16 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	migrations := []migration{
+	for _, migration := range migrations {
+		if err := s.applyMigration(ctx, migration); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func allMigrations() []migration {
+	return []migration{
 		{
 			version: 1,
 			name:    "create audit_events",
@@ -237,8 +263,9 @@ ON filter_rules (kind, match_type, enabled)`,
 	retention_duration_ns,
 	privacy_level,
 	updated_at
-) VALUES (1, 0, 0, '')`,
+) VALUES (1, ?, 0, '')`,
 			},
+			args: [][]any{nil, {defaultAuditRetentionNS}},
 		},
 		{
 			version: 7,
@@ -355,14 +382,51 @@ ON audit_events (timestamp, client_ip)`,
 ON audit_events (timestamp, action, client_ip)`,
 			},
 		},
+		{
+			version: 13,
+			name:    "default bounded audit retention",
+			statements: []string{
+				`UPDATE audit_settings
+SET retention_duration_ns = ?
+WHERE id = 1 AND retention_duration_ns = 0`,
+			},
+			args: [][]any{{defaultAuditRetentionNS}},
+		},
 	}
+}
 
-	for _, migration := range migrations {
-		if err := s.applyMigration(ctx, migration); err != nil {
-			return err
+func mainMigrations() []migration {
+	return filterMigrations(map[int]bool{
+		2:  true,
+		3:  true,
+		4:  true,
+		5:  true,
+		7:  true,
+		11: true,
+	})
+}
+
+func auditMigrations() []migration {
+	return filterMigrations(map[int]bool{
+		1:  true,
+		6:  true,
+		8:  true,
+		9:  true,
+		10: true,
+		12: true,
+		13: true,
+	})
+}
+
+func filterMigrations(versions map[int]bool) []migration {
+	all := allMigrations()
+	filtered := make([]migration, 0, len(versions))
+	for _, migration := range all {
+		if versions[migration.version] {
+			filtered = append(filtered, migration)
 		}
 	}
-	return nil
+	return filtered
 }
 
 func (s *SQLiteStore) applyMigration(ctx context.Context, migration migration) error {
@@ -387,8 +451,12 @@ func (s *SQLiteStore) applyMigration(ctx context.Context, migration migration) e
 		return tx.Commit()
 	}
 
-	for _, statement := range migration.statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
+	for i, statement := range migration.statements {
+		var args []any
+		if i < len(migration.args) {
+			args = migration.args[i]
+		}
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
 			return fmt.Errorf("apply migration %d: %w", migration.version, err)
 		}
 	}
@@ -410,6 +478,7 @@ type migration struct {
 	version    int
 	name       string
 	statements []string
+	args       [][]any
 }
 
 func ensureParentDir(path string) error {

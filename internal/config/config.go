@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -87,7 +88,8 @@ type AdminConfig struct {
 }
 
 type StorageConfig struct {
-	Path string `yaml:"path" json:"path"`
+	Path      string `yaml:"path" json:"path"`
+	AuditPath string `yaml:"audit_path" json:"audit_path"`
 }
 
 type BlockingConfig struct {
@@ -145,7 +147,8 @@ func Default() Config {
 			Listen: "127.0.0.1:8080",
 		},
 		Storage: StorageConfig{
-			Path: "corehole.db",
+			Path:      "corehole.db",
+			AuditPath: "corehole-audit.db",
 		},
 		Blocking: BlockingConfig{
 			Response: coreholedns.BlockingResponseNullIP,
@@ -180,6 +183,7 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	normalizeLegacyCacheConfig(&cfg, b)
+	normalizeStorageConfig(&cfg, b)
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -202,6 +206,33 @@ func normalizeLegacyCacheConfig(cfg *Config, payload []byte) {
 	cfg.DNS.CacheDenialTTL = cfg.DNS.CacheTTL
 }
 
+func normalizeStorageConfig(cfg *Config, payload []byte) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Storage.AuditPath != "" && bytes.Contains(payload, []byte("audit_path")) {
+		return
+	}
+	cfg.Storage.AuditPath = DefaultAuditPath(cfg.Storage.Path)
+}
+
+func DefaultAuditPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "corehole-audit.db"
+	}
+	if path == ":memory:" {
+		return path
+	}
+	if strings.HasPrefix(path, "file:") {
+		return path + "-audit"
+	}
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return path + "-audit"
+	}
+	return strings.TrimSuffix(path, ext) + "-audit" + ext
+}
+
 func (c Config) Validate() error {
 	if c.DNS.Listen == "" {
 		return errors.New("dns.listen is required")
@@ -211,6 +242,9 @@ func (c Config) Validate() error {
 	}
 	if c.Storage.Path == "" {
 		return errors.New("storage.path is required")
+	}
+	if c.Storage.AuditPath == "" {
+		return errors.New("storage.audit_path is required")
 	}
 	if !supportedLoggingLevel(c.Logging.Level) {
 		return errors.New("logging.level must be debug, info, warn, warning, error, or empty")

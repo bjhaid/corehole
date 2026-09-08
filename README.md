@@ -41,7 +41,8 @@ The built-in defaults are enough for a first run:
 - DNS: `:53` for UDP and TCP DNS queries; test locally at `127.0.0.1`
 - Admin console: `http://127.0.0.1:8080`
 - Upstream resolver: Cloudflare at `1.1.1.1:53`
-- SQLite storage: `./corehole.db`
+- SQLite storage: `./corehole.db` for configuration/admin data and
+  `./corehole-audit.db` for query logs/analytics
 - Blocking: bundled seed blocklist enabled, blocked A queries return `0.0.0.0`
 - DNS cache: 3600 second successful-response TTL cap, 30 second denial TTL cap,
   32,768 successful-response entries, 4,096 denial/failure entries, and bounded
@@ -77,11 +78,12 @@ corehole version
 ```
 
 On first run for a SQLite database, the console asks you to create the first
-admin password. Admin users and API keys are persisted in the configured
+admin password. Admin users and API keys are persisted in the configured main
 SQLite database and survive restarts as long as `storage.path` points at the
 same database. Browser sessions are stored in SQLite and survive restarts until
-they expire or are explicitly logged out. After login, use the web console to
-manage blocklists, upstream resolvers, DNSSEC assistance, custom DNS,
+they expire or are explicitly logged out. Query logs and analytics are stored in
+the audit SQLite database at `storage.audit_path`. After login, use the web
+console to manage blocklists, upstream resolvers, DNSSEC assistance, custom DNS,
 clients/groups, analytics, settings, and API keys.
 
 ## Runtime Dependencies
@@ -249,6 +251,15 @@ The admin API is served from the same listener as the console.
   all recorded queries. Client-level analytics include `top_clients`,
   `top_blocked_clients`, and `client_time_buckets` for per-client activity
   views.
+
+Detailed query log rows are retained for 48 hours by default in the audit
+database and cleaned up automatically in the background; dashboard all-time
+counters are retained separately. Existing single-database installs keep their
+old raw audit rows in `storage.path`, but new audit writes go to
+`storage.audit_path`; legacy audit settings and all-time counters are copied
+forward on startup. If an older database has already grown large, cleanup makes
+freed pages reusable, but SQLite may not reduce the file size until `VACUUM` is
+run during a maintenance window.
 
 Protected JSON API endpoints accept either the browser session cookie or an API
 key:

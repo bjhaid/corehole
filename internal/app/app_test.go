@@ -410,6 +410,7 @@ func testConfig(dbPath string) config.Config {
 	cfg.DNS.Listen = ":1053"
 	cfg.Admin.Listen = "127.0.0.1:0"
 	cfg.Storage.Path = dbPath
+	cfg.Storage.AuditPath = config.DefaultAuditPath(dbPath)
 	cfg.Blocking.Bundled = false
 	cfg.Blocking.Blocklists = nil
 	return cfg
