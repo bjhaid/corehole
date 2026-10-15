@@ -830,6 +830,106 @@ func TestQuerySummaryAggregatesAuditEvents(t *testing.T) {
 	}
 }
 
+func TestTimeBucketsRespectBoundariesAndOtherActions(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	defer closeStore(t, ctx, store)
+	start := time.Date(2026, 10, 15, 10, 0, 0, 0, time.UTC)
+	var events []Event
+	for _, offset := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond, time.Hour - time.Nanosecond, time.Hour, time.Hour + time.Millisecond, 2 * time.Hour} {
+		event := testEvent(start.Add(offset), "boundary.example.")
+		event.ClientIP = netip.MustParseAddr("192.0.2.1")
+		event.Action = coredns.Action("other")
+		events = append(events, event)
+	}
+	if err := insertBatch(ctx, store.DB(), events); err != nil {
+		t.Fatal(err)
+	}
+	opts := normalizeSummaryOptions(SummaryOptions{Now: start.Add(time.Hour), BucketCount: 2, BucketInterval: time.Hour})
+	buckets, err := timeBuckets(ctx, store.DB(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buckets[0].Total != 3 || buckets[1].Total != 2 || buckets[0].Allowed != 0 || buckets[0].Blocked != 0 {
+		t.Fatalf("boundary buckets = %#v", buckets)
+	}
+	clients, err := clientTimeBuckets(ctx, store.DB(), opts, []NamedTotal{{Name: "192.0.2.1"}}, buckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clients[0].Clients[0].Count != 3 || clients[1].Clients[0].Count != 2 {
+		t.Fatalf("client boundary buckets = %#v", clients)
+	}
+	// The maximum supported request must stay within SQLite's compound-query
+	// and parameter limits, including many selected clients and empty buckets.
+	opts.BucketCount = 168
+	topClients := make([]NamedTotal, 100)
+	for i := range topClients {
+		topClients[i].Name = "192.0.2.1"
+	}
+	buckets, err = timeBuckets(ctx, store.DB(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientTimeBuckets(ctx, store.DB(), opts, topClients, buckets); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSQLiteSinkSummaryCacheInvalidatesAndCustomWindowsBypass(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	defer closeStore(t, ctx, store)
+	sink, err := NewSQLiteSink(store.DB(), WithRetentionCleanupInterval(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSink(t, ctx, sink)
+	now := time.Now().UTC()
+	if err := insertBatch(ctx, store.DB(), []Event{testEvent(now, "cache.example.")}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := sink.Summary(ctx, SummaryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := insertBatch(ctx, store.DB(), []Event{testEvent(now, "cache.example.")}); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := sink.Summary(ctx, SummaryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.TotalQueryCount != 1 || cached.TotalQueryCount != 1 {
+		t.Fatal("default summary not cached")
+	}
+	fresh, err := sink.Summary(ctx, SummaryOptions{Now: now})
+	if err != nil || fresh.TotalQueryCount != 2 {
+		t.Fatalf("custom summary not fresh: %#v, %v", fresh, err)
+	}
+	settings := DefaultSettings()
+	settings.PrivacyLevel = PrivacyLevelHideClientAndDomain
+	if err := sink.SetSettings(ctx, settings); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err = sink.Summary(ctx, SummaryOptions{})
+	if err != nil || fresh.TotalQueryCount != 2 {
+		t.Fatal("settings did not invalidate summary")
+	}
+	// Cached summaries remain raw; privacy is applied to a clone per response.
+	projected := ProjectSummary(fresh, settings.PrivacyLevel)
+	if len(projected.TopQueriedDomains) != 1 || projected.TopQueriedDomains[0].Name != "" || fresh.TopQueriedDomains[0].Name == "" {
+		t.Fatal("privacy projection mutated cached data")
+	}
+	if _, err := sink.CleanupExpired(ctx, now.Add(49*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err = sink.Summary(ctx, SummaryOptions{})
+	if err != nil || len(fresh.TopQueriedDomains) != 0 {
+		t.Fatal("cleanup did not invalidate summary")
+	}
+}
+
 func openTestStore(t *testing.T, ctx context.Context) *storage.SQLiteStore {
 	t.Helper()
 

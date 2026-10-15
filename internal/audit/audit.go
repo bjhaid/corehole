@@ -108,6 +108,7 @@ func (NoopSink) Record(context.Context, Event) {}
 func (NoopSink) Close(context.Context) error { return nil }
 
 type SQLiteSink struct {
+	summaryCache    summaryCache
 	db              *sql.DB
 	readDB          *sql.DB
 	events          chan Event

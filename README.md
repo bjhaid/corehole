@@ -283,7 +283,8 @@ The admin API is served from the same listener as the console.
   aggregates, including `total_query_count` for computing frequencies against
   all recorded queries. Client-level analytics include `top_clients`,
   `top_blocked_clients`, and `client_time_buckets` for per-client activity
-  views.
+  views. The default rolling summary is cached for up to 15 seconds; custom
+  windows bypass that cache. Privacy is applied fresh to every response.
 
 Detailed query log rows are retained for 48 hours by default in the audit
 database and cleaned up automatically in the background; dashboard all-time

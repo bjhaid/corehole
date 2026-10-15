@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,9 @@ const (
 	defaultSummaryBucketInterval = time.Hour
 	DefaultRetentionDuration     = 48 * time.Hour
 	cleanupBatchSize             = 5000
+	// Keep fractional events on the correct side of whole-second boundaries;
+	// RFC3339Nano omits zero fractions, which breaks lexical range comparisons.
+	bucketBoundaryLayout = "2006-01-02T15:04:05.000000000Z"
 )
 
 type PrivacyLevel int
@@ -99,18 +103,35 @@ func (s *SQLiteSink) Settings(ctx context.Context) (Settings, error) {
 }
 
 func (s *SQLiteSink) SetSettings(ctx context.Context, settings Settings) error {
-	return SetSettings(ctx, s.db, settings)
+	err := SetSettings(ctx, s.db, settings)
+	if err == nil {
+		s.summaryCache.invalidate()
+	}
+	return err
 }
 
 func (s *SQLiteSink) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
-	return CleanupExpired(ctx, s.db, now)
+	deleted, err := CleanupExpired(ctx, s.db, now)
+	if deleted > 0 {
+		s.summaryCache.invalidate()
+	}
+	return deleted, err
 }
 
 func (s *SQLiteSink) CleanupExpiredBatch(ctx context.Context, now time.Time) (int64, error) {
-	return CleanupExpiredBatch(ctx, s.db, now)
+	deleted, err := CleanupExpiredBatch(ctx, s.db, now)
+	if deleted > 0 {
+		s.summaryCache.invalidate()
+	}
+	return deleted, err
 }
 
 func (s *SQLiteSink) Summary(ctx context.Context, opts SummaryOptions) (Summary, error) {
+	if opts == (SummaryOptions{}) {
+		return s.summaryCache.get(ctx, func(ctx context.Context) (Summary, error) {
+			return QuerySummary(ctx, s.readDB, opts)
+		})
+	}
 	return QuerySummary(ctx, s.readDB, opts)
 }
 
@@ -759,16 +780,20 @@ func timeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions) ([]TimeBu
 		}
 	}
 
-	intervalSeconds := int64(opts.BucketInterval / time.Second)
-	if intervalSeconds <= 0 {
-		intervalSeconds = int64(defaultSummaryBucketInterval / time.Second)
+	// Each range can use the covering timestamp/action index directly. Parsing
+	// every timestamp with strftime and sorting all events into groups is much
+	// more expensive, especially on small hosts.
+	var query strings.Builder
+	args := make([]any, 0, len(buckets)*3)
+	for i, bucket := range buckets {
+		if i > 0 {
+			query.WriteString("\nUNION ALL\n")
+		}
+		query.WriteString(`SELECT ?, COUNT(*), COALESCE(SUM(action = 'allow'), 0), COALESCE(SUM(action = 'block'), 0)
+FROM audit_events WHERE timestamp >= ? AND timestamp < ?`)
+		args = append(args, i, bucket.Start.Format(bucketBoundaryLayout), bucket.End.Format(bucketBoundaryLayout))
 	}
-
-	rows, err := db.QueryContext(ctx, `
-SELECT CAST((strftime('%s', timestamp) - ?) / ? AS INTEGER) AS bucket_index, action, COUNT(*)
-FROM audit_events
-WHERE timestamp >= ? AND timestamp < ?
-GROUP BY bucket_index, action`, start.Unix(), intervalSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+	rows, err := db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query time buckets: %w", err)
 	}
@@ -777,24 +802,16 @@ GROUP BY bucket_index, action`, start.Unix(), intervalSeconds, start.Format(time
 	}()
 
 	for rows.Next() {
-		var (
-			index  int
-			action string
-			count  int
-		)
-		if err := rows.Scan(&index, &action, &count); err != nil {
+		var index, total, allowed, blocked int
+		if err := rows.Scan(&index, &total, &allowed, &blocked); err != nil {
 			return nil, fmt.Errorf("scan time bucket event: %w", err)
 		}
 		if index < 0 || index >= len(buckets) {
 			continue
 		}
-		buckets[index].Total += count
-		switch action {
-		case "allow":
-			buckets[index].Allowed += count
-		case "block":
-			buckets[index].Blocked += count
-		}
+		buckets[index].Total = total
+		buckets[index].Allowed = allowed
+		buckets[index].Blocked = blocked
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read time bucket events: %w", err)
@@ -837,22 +854,26 @@ func clientTimeBuckets(ctx context.Context, db *sql.DB, opts SummaryOptions, top
 		counts[i] = make([]int, len(topClients))
 	}
 
-	intervalSeconds := int64(opts.BucketInterval / time.Second)
-	if intervalSeconds <= 0 {
-		intervalSeconds = int64(defaultSummaryBucketInterval / time.Second)
-	}
 	placeholders := make([]string, 0, len(topClients))
-	args := []any{start.Unix(), intervalSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano)}
-	for _, client := range topClients {
+	for range topClients {
 		placeholders = append(placeholders, "?")
-		args = append(args, client.Name)
 	}
-
-	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
-SELECT CAST((strftime('%%s', timestamp) - ?) / ? AS INTEGER) AS bucket_index, client_ip, COUNT(*)
-FROM audit_events
-WHERE timestamp >= ? AND timestamp < ? AND client_ip IN (%s)
-GROUP BY bucket_index, client_ip`, joinSQLPlaceholders(placeholders)), args...)
+	var query strings.Builder
+	args := make([]any, 0, len(buckets)*(3+len(topClients)))
+	for i, bucket := range buckets {
+		if i > 0 {
+			query.WriteString("\nUNION ALL\n")
+		}
+		query.WriteString(`SELECT ?, client_ip, COUNT(*) FROM audit_events
+WHERE timestamp >= ? AND timestamp < ? AND client_ip IN (`)
+		query.WriteString(joinSQLPlaceholders(placeholders))
+		query.WriteString(") GROUP BY client_ip")
+		args = append(args, i, bucket.Start.Format(bucketBoundaryLayout), bucket.End.Format(bucketBoundaryLayout))
+		for _, client := range topClients {
+			args = append(args, client.Name)
+		}
+	}
+	rows, err := db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query client time buckets: %w", err)
 	}

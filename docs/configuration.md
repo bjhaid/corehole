@@ -245,6 +245,44 @@ sqlite3 ./corehole.db 'DELETE FROM app_config WHERE id = 1;'
 corehole serve --config ./corehole.yaml
 ```
 
+## Analytics Performance
+
+The console loads settings and the summary concurrently and renders each as
+soon as its request completes. Slow charts do not prevent settings from becoming
+usable, and slow settings do not delay completed charts.
+
+Time-series queries use indexed timestamp ranges instead of parsing each event's
+timestamp with `strftime` and sorting the entire window into buckets. They use
+existing audit indexes; no index rebuild or production-data migration is needed.
+
+The default rolling summary used by the console has a single-entry, 15-second
+in-process cache. Concurrent requests share one computation. Default summaries
+may lag newly recorded events by roughly 15 seconds plus computation time.
+Query logs and dashboard counters are not cached by this mechanism. Explicit
+custom summary options bypass it.
+Settings changes and retention cleanup invalidate the cache, including work
+already in flight. Failed computations are not cached. Privacy settings are
+read and applied separately to every response, never cached in a projected view.
+
+For a repeatable local benchmark with 100,000 synthetic events:
+
+```sh
+go test ./internal/audit -run '^$' -bench BenchmarkAnalytics -benchtime=5x
+node --test internal/admin/testjs/*.test.mjs
+```
+
+Optionally set `COREHOLE_BENCH_EVENTS` to a private gzip JSON-lines sample, with
+each row `[timestamp, client_ip, query_name, action, cache_status]`. The benchmark
+imports that sample into a temporary local audit database and never changes the
+source database. Do not commit production samples or run database-wide backups
+on resource-constrained DNS hosts just to benchmark this code.
+
+On a 100,000-row production-derived sample, laptop measurements reduced uncached
+summary time from approximately 437 ms to 189–196 ms (roughly 2.3x faster), with
+the two chart aggregations falling from approximately 318 ms combined to
+54–60 ms. Warm cache lookups took approximately 4–25 microseconds. These are local
+backend measurements, not Raspberry Pi HTTP latency guarantees.
+
 ## Validation Rules
 
 Startup validation fails when:

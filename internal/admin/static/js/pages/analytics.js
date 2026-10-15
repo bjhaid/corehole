@@ -3,6 +3,7 @@ import {fetchJSON, fetchOptionalJSON} from "../lib/api.js";
 import {on, required} from "../lib/dom.js";
 import {cloneTemplate, configureTemplates, emptyRow, setTemplateText, templateField} from "../lib/elements.js";
 import {analyticsCount, analyticsTotalQueryCount, countValue, normalizeAnalyticsItems} from "../lib/analytics-summary.js";
+import {loadAnalyticsSections} from "../lib/analytics-loader.js";
 import {displayNumber, displayValue, firstDefined, formatTime, pick} from "../lib/format.js";
 
 const clientSeriesColors = ["#276ef1", "#179c5f", "#d64545", "#8a63d2", "#d08b13", "#0f8a9d"];
@@ -768,12 +769,12 @@ initAdminPage({
     }
 
     async function refresh() {
-      const [summary, settings] = await Promise.all([
-        fetchOptionalJSON("/api/analytics/summary"),
-        fetchOptionalJSON("/api/analytics/settings")
-      ]);
-      renderSummary(summary);
-      renderSettings(settings);
+      await loadAnalyticsSections(
+        () => fetchOptionalJSON("/api/analytics/summary"),
+        () => fetchOptionalJSON("/api/analytics/settings"),
+        renderSummary,
+        renderSettings
+      );
       setUpdatedStatus("Analytics");
     }
 
