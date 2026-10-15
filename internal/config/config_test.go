@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,49 @@ import (
 	"github.com/bjhaid/corehole/internal/blocklist"
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
 )
+
+func TestReaderConnectionConfiguration(t *testing.T) {
+	defaults := Default().Storage
+	if defaults.MainReadConnections != 10 || defaults.AuditReadConnections != 10 || defaults.SessionReadConnections != 10 {
+		t.Fatalf("reader defaults = %#v, want ten each", defaults)
+	}
+	for _, tc := range []struct {
+		name, yaml                       string
+		wantMain, wantAudit, wantSession int
+	}{
+		{"omitted", "storage: {}", 10, 10, 10},
+		{"custom", "storage:\n  main_read_connections: 12\n  audit_read_connections: 20\n  session_read_connections: 15", 12, 20, 15},
+		{"partial", "storage:\n  audit_read_connections: 25", 10, 25, 10},
+		{"explicit smaller", "storage:\n  main_read_connections: 3", 3, 10, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "corehole.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Storage.MainReadConnections != tc.wantMain || cfg.Storage.AuditReadConnections != tc.wantAudit || cfg.Storage.SessionReadConnections != tc.wantSession {
+				t.Fatalf("storage = %#v", cfg.Storage)
+			}
+		})
+	}
+	for _, field := range []string{"main_read_connections", "audit_read_connections", "session_read_connections"} {
+		for _, value := range []int{0, -1} {
+			t.Run(fmt.Sprintf("%s/%d", field, value), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "corehole.yaml")
+				if err := os.WriteFile(path, []byte(fmt.Sprintf("storage:\n  %s: %d\n", field, value)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := Load(path); err == nil {
+					t.Fatal("nonpositive reader limit accepted")
+				}
+			})
+		}
+	}
+}
 
 func TestDefaultEnablesBundledBlocking(t *testing.T) {
 	cfg := Default()

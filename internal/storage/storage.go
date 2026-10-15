@@ -169,6 +169,20 @@ func (s *SQLiteStore) ReadDB() *sql.DB {
 	return s.db
 }
 
+// SetReaderConnections adjusts only the dedicated reader pool. Connections
+// remain lazy; this does not pre-open the configured number of connections.
+func (s *SQLiteStore) SetReaderConnections(limit int) error {
+	if limit < 1 {
+		return errors.New("reader connection limit must be positive")
+	}
+	if s.readDB == nil {
+		return errors.New("store has no dedicated reader pool")
+	}
+	s.readDB.SetMaxOpenConns(limit)
+	s.readDB.SetMaxIdleConns(limit)
+	return nil
+}
+
 func (s *SQLiteStore) Close(ctx context.Context) error {
 	done := make(chan error, 1)
 	go func() {

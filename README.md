@@ -270,6 +270,8 @@ The admin API is served from the same listener as the console.
   apply through DNS hot reload when the DNS listen address is unchanged and the
   updater has a DNS reloader; otherwise the response includes
   `restart_required: true`.
+  Reader-pool limits are configurable under `storage`, default to 10 each, and
+  require restart; see [database pool configuration](docs/configuration.md).
 - `GET /api/blocking/status`: requires authentication and returns whether
   blocking is active, paused indefinitely, or paused until a timestamp.
 - `PUT /api/blocking/status`: requires authentication and pauses or resumes

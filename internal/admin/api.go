@@ -130,6 +130,7 @@ func WithBlockingController(controller BlockingController) Option {
 }
 
 type ConfigSnapshot struct {
+	Storage               config.StorageConfig
 	DNSListen             string
 	AdminListen           string
 	Upstreams             []UpstreamSnapshot
@@ -155,10 +156,17 @@ type ConfigSnapshot struct {
 }
 
 type ConfigUpdateRequest struct {
+	Storage  *StorageConfigUpdate  `json:"storage,omitempty"`
 	DNS      *DNSConfigUpdate      `json:"dns,omitempty"`
 	Admin    *AdminConfigUpdate    `json:"admin,omitempty"`
 	Blocking *BlockingConfigUpdate `json:"blocking,omitempty"`
 	Logging  *LoggingConfigUpdate  `json:"logging,omitempty"`
+}
+
+type StorageConfigUpdate struct {
+	MainReadConnections    *int `json:"main_read_connections,omitempty"`
+	AuditReadConnections   *int `json:"audit_read_connections,omitempty"`
+	SessionReadConnections *int `json:"session_read_connections,omitempty"`
 }
 
 type DNSConfigUpdate struct {
@@ -299,6 +307,7 @@ type queryEventResponse struct {
 }
 
 type configResponse struct {
+	Storage               config.StorageConfig          `json:"storage"`
 	DNSListen             string                        `json:"dns_listen"`
 	AdminListen           string                        `json:"admin_listen"`
 	Upstreams             []UpstreamSnapshot            `json:"upstreams"`
@@ -704,6 +713,7 @@ func (s *Server) configSnapshot(ctx context.Context) (ConfigSnapshot, error) {
 func configResponseFromSnapshot(snapshot ConfigSnapshot) configResponse {
 	blocklists := cloneStrings(snapshot.Blocklists)
 	return configResponse{
+		Storage:               snapshot.Storage,
 		DNSListen:             snapshot.DNSListen,
 		AdminListen:           snapshot.AdminListen,
 		Upstreams:             cloneUpstreams(snapshot.Upstreams),
@@ -783,6 +793,17 @@ func (m configStoreManager) Update(ctx context.Context, req ConfigUpdateRequest)
 var errInvalidConfigUpdate = errors.New("invalid config update")
 
 func applyConfigUpdate(cfg config.Config, req ConfigUpdateRequest) config.Config {
+	if req.Storage != nil {
+		if req.Storage.MainReadConnections != nil {
+			cfg.Storage.MainReadConnections = *req.Storage.MainReadConnections
+		}
+		if req.Storage.AuditReadConnections != nil {
+			cfg.Storage.AuditReadConnections = *req.Storage.AuditReadConnections
+		}
+		if req.Storage.SessionReadConnections != nil {
+			cfg.Storage.SessionReadConnections = *req.Storage.SessionReadConnections
+		}
+	}
 	if req.DNS != nil {
 		if req.DNS.Listen != nil {
 			cfg.DNS.Listen = *req.DNS.Listen
@@ -941,6 +962,7 @@ func snapshotFromConfig(cfg config.Config) ConfigSnapshot {
 
 	return ConfigSnapshot{
 		DNSListen:             cfg.DNS.Listen,
+		Storage:               cfg.Storage,
 		AdminListen:           cfg.Admin.Listen,
 		Upstreams:             upstreams,
 		CacheTTL:              cfg.DNS.CacheTTL,
@@ -985,6 +1007,7 @@ func restartRequired(current config.Config, next config.Config, dnsReloaded bool
 	dnsRestartRequired := !reflect.DeepEqual(current.DNS, next.DNS) && !dnsReloaded
 	corednsLoggingRestartRequired := coreDNSLoggingChanged(current.Logging, next.Logging) && !dnsReloaded
 	return dnsRestartRequired ||
+		current.Storage != next.Storage ||
 		corednsLoggingRestartRequired ||
 		current.Admin.Listen != next.Admin.Listen ||
 		!reflect.DeepEqual(current.Blocking.Blocklists, next.Blocking.Blocklists)

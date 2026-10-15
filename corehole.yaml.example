@@ -16,6 +16,9 @@ dns:
 admin:
   listen: "127.0.0.1:8080"
 storage:
+  main_read_connections: 10
+  audit_read_connections: 10
+  session_read_connections: 10
   path: "./corehole.db"
   audit_path: "./corehole-audit.db"
 blocking:

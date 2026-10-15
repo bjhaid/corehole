@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -9,6 +10,68 @@ import (
 	coreholedns "github.com/bjhaid/corehole/internal/dns"
 	"github.com/bjhaid/corehole/internal/storage"
 )
+
+func TestPersistedReaderConnectionConfiguration(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.OpenMain(ctx, filepath.Join(t.TempDir(), "config.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close(ctx) }()
+	store := config.NewSQLiteStore(db.DB())
+	cfg := config.Default()
+	cfg.Storage.MainReadConnections, cfg.Storage.AuditReadConnections, cfg.Storage.SessionReadConnections = 12, 20, 15
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := config.Default()
+	bootstrap.Storage.MainReadConnections = 99
+	result, err := config.InitializeStoreWithSource(ctx, store, bootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Source != config.SourcePersisted || result.Config.Storage != cfg.Storage {
+		t.Fatalf("persisted config not authoritative: %#v", result)
+	}
+	// Old persisted JSON has no pool settings: decode over the new defaults.
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	fields := payload["storage"].(map[string]any)
+	for _, field := range []string{"main_read_connections", "audit_read_connections", "session_read_connections"} {
+		delete(fields, field)
+	}
+	encoded, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB().ExecContext(ctx, "UPDATE app_config SET payload=? WHERE id=1", string(encoded)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Storage.MainReadConnections != 10 || loaded.Storage.AuditReadConnections != 10 || loaded.Storage.SessionReadConnections != 10 {
+		t.Fatalf("legacy defaults = %#v", loaded.Storage)
+	}
+	fields["audit_read_connections"] = 0
+	encoded, err = json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB().ExecContext(ctx, "UPDATE app_config SET payload=? WHERE id=1", string(encoded)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(ctx); err == nil {
+		t.Fatal("invalid persisted reader limit accepted")
+	}
+}
 
 func TestSQLiteStoreInitializeSaveLoad(t *testing.T) {
 	ctx := context.Background()

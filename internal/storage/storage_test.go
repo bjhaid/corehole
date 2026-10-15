@@ -126,6 +126,45 @@ func TestAuditMemoryStoreSharesSchemaWithReaders(t *testing.T) {
 	}
 }
 
+func TestReaderPoolLimitsAreConfigurable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(context.Context, string) (*SQLiteStore, error)
+	}{
+		{"main", OpenMain}, {"audit", OpenAudit}, {"sessions", OpenSessions},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			store, err := tc.open(ctx, filepath.Join(t.TempDir(), "db.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = store.Close(ctx) }()
+			writers := store.DB().Stats().MaxOpenConnections
+			for _, limit := range []int{15, 3} {
+				if err := store.SetReaderConnections(limit); err != nil {
+					t.Fatal(err)
+				}
+				if store.ReadDB().Stats().MaxOpenConnections != limit {
+					t.Fatal("reader limit not applied")
+				}
+				if store.DB().Stats().MaxOpenConnections != writers {
+					t.Fatal("reader setting changed writer pool")
+				}
+			}
+			for _, invalid := range []int{0, -1} {
+				if err := store.SetReaderConnections(invalid); err == nil {
+					t.Fatal("nonpositive limit accepted")
+				}
+				if store.ReadDB().Stats().MaxOpenConnections != 3 {
+					t.Fatal("invalid limit changed pool")
+				}
+			}
+		})
+	}
+}
+
 func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corehole.db")

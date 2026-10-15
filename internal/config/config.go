@@ -88,8 +88,11 @@ type AdminConfig struct {
 }
 
 type StorageConfig struct {
-	Path      string `yaml:"path" json:"path"`
-	AuditPath string `yaml:"audit_path" json:"audit_path"`
+	Path                   string `yaml:"path" json:"path"`
+	AuditPath              string `yaml:"audit_path" json:"audit_path"`
+	MainReadConnections    int    `yaml:"main_read_connections" json:"main_read_connections"`
+	AuditReadConnections   int    `yaml:"audit_read_connections" json:"audit_read_connections"`
+	SessionReadConnections int    `yaml:"session_read_connections" json:"session_read_connections"`
 }
 
 type BlockingConfig struct {
@@ -147,8 +150,11 @@ func Default() Config {
 			Listen: "127.0.0.1:8080",
 		},
 		Storage: StorageConfig{
-			Path:      "corehole.db",
-			AuditPath: "corehole-audit.db",
+			Path:                   "corehole.db",
+			AuditPath:              "corehole-audit.db",
+			MainReadConnections:    DefaultReadConnections,
+			AuditReadConnections:   DefaultReadConnections,
+			SessionReadConnections: DefaultReadConnections,
 		},
 		Blocking: BlockingConfig{
 			Response: coreholedns.BlockingResponseNullIP,
@@ -162,6 +168,7 @@ func Default() Config {
 }
 
 const (
+	DefaultReadConnections  = 10
 	MaxCacheSuccessTTL      = 3600
 	MaxCacheDenialTTL       = 1800
 	DefaultCacheDenialTTL   = 30
@@ -245,6 +252,15 @@ func (c Config) Validate() error {
 	}
 	if c.Storage.AuditPath == "" {
 		return errors.New("storage.audit_path is required")
+	}
+	if c.Storage.MainReadConnections < 1 {
+		return errors.New("storage.main_read_connections must be positive")
+	}
+	if c.Storage.AuditReadConnections < 1 {
+		return errors.New("storage.audit_read_connections must be positive")
+	}
+	if c.Storage.SessionReadConnections < 1 {
+		return errors.New("storage.session_read_connections must be positive")
 	}
 	if !supportedLoggingLevel(c.Logging.Level) {
 		return errors.New("logging.level must be debug, info, warn, warning, error, or empty")

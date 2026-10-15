@@ -67,6 +67,58 @@ func TestLoginDoesNotWaitForMainDatabaseWriter(t *testing.T) {
 	}
 }
 
+func TestConfigUpdateReaderPools(t *testing.T) {
+	for _, field := range []string{"main_read_connections", "audit_read_connections", "session_read_connections"} {
+		t.Run(field, func(t *testing.T) {
+			store := &fakeConfigStore{cfg: config.Default()}
+			reloader := &fakeDNSReloader{}
+			server := newTestServer(WithConfigStoreAndDNSReloader(store, reloader))
+			cookie := setupSession(t, server)
+			res := putJSON(t, server, "/api/config", map[string]any{"storage": map[string]int{field: 20}}, cookie)
+			if res.Code != http.StatusOK {
+				t.Fatalf("PUT config = %d: %s", res.Code, res.Body.String())
+			}
+			updated := decodeResponse[configUpdateResponse](t, res)
+			if !updated.RestartRequired {
+				t.Fatal("pool update must require restart")
+			}
+			if reloader.reloadCount != 0 {
+				t.Fatal("pool update must not reload DNS")
+			}
+			want := config.Default().Storage
+			switch field {
+			case "main_read_connections":
+				want.MainReadConnections = 20
+			case "audit_read_connections":
+				want.AuditReadConnections = 20
+			case "session_read_connections":
+				want.SessionReadConnections = 20
+			}
+			if store.cfg.Storage != want || updated.Config.Storage != want {
+				t.Fatalf("pool update = %#v, want %#v", updated.Config.Storage, want)
+			}
+			read := get(t, server, "/api/config", cookie)
+			if read.Code != http.StatusOK || decodeResponse[configResponse](t, read).Storage != want {
+				t.Fatal("GET config did not return saved reader limits")
+			}
+			// Re-saving unchanged settings must not report a restart.
+			res = putJSON(t, server, "/api/config", map[string]any{"storage": map[string]int{field: 20}}, cookie)
+			if res.Code != http.StatusOK || decodeResponse[configUpdateResponse](t, res).RestartRequired {
+				t.Fatal("unchanged limit requires restart")
+			}
+			for _, invalid := range []int{0, -1} {
+				res = putJSON(t, server, "/api/config", map[string]any{"storage": map[string]int{field: invalid}}, cookie)
+				if res.Code != http.StatusBadRequest {
+					t.Fatalf("invalid limit = %d, want 400", res.Code)
+				}
+				if store.cfg.Storage != want {
+					t.Fatal("invalid limit was persisted")
+				}
+			}
+		})
+	}
+}
+
 func TestStatusBeforeSetup(t *testing.T) {
 	server := newTestServer()
 

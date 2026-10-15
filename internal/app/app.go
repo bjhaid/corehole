@@ -65,9 +65,18 @@ func Serve(ctx context.Context, args []string) error {
 		return fmt.Errorf("config store: %w", err)
 	}
 	cfg := initResult.Config
+	if err := store.SetReaderConnections(cfg.Storage.MainReadConnections); err != nil {
+		return fmt.Errorf("main reader pool: %w", err)
+	}
 	coreholelog.Configure(string(cfg.Logging.EffectiveLevel()), string(cfg.Logging.EffectiveFormat()))
 
 	auditStore, err := storage.OpenAudit(ctx, cfg.Storage.AuditPath)
+	if err == nil {
+		if poolErr := auditStore.SetReaderConnections(cfg.Storage.AuditReadConnections); poolErr != nil {
+			_ = auditStore.Close(ctx)
+			err = poolErr
+		}
+	}
 	var auditSink audit.Sink = audit.NoopSink{}
 	var auditReader admin.AuditReader
 	if err != nil {
@@ -144,7 +153,10 @@ func Serve(ctx context.Context, args []string) error {
 			defer cancel()
 			_ = sessionStore.Close(closeCtx)
 		}()
-		sessionErr = admin.CopyLegacySessions(ctx, store.ReadDB(), sessionStore.DB())
+		sessionErr = sessionStore.SetReaderConnections(cfg.Storage.SessionReadConnections)
+		if sessionErr == nil {
+			sessionErr = admin.CopyLegacySessions(ctx, store.ReadDB(), sessionStore.DB())
+		}
 		if sessionErr == nil {
 			sessions = admin.NewSQLiteSessionStoreWithReader(sessionStore.DB(), sessionStore.ReadDB())
 		}
@@ -499,6 +511,7 @@ func adminConfigSnapshot(cfg config.Config) admin.ConfigSnapshot {
 	}
 
 	return admin.ConfigSnapshot{
+		Storage:               cfg.Storage,
 		DNSListen:             cfg.DNS.Listen,
 		AdminListen:           cfg.Admin.Listen,
 		Upstreams:             upstreams,

@@ -54,8 +54,11 @@ config source and active blocklist count.
 | `dns.conditional_forwarding.protocol` | string | `""` | `""`, `"udp"`, `"dns"`, `"tcp"`, `"tls"`, or `"https"` | Uses the same CoreDNS target behavior as upstream resolver `protocol`. |
 | `dns.conditional_forwarding.tls_server_name` | string | `""` | Must not contain whitespace or braces | Optional TLS server name for a TLS conditional forwarding resolver. |
 | `admin.listen` | string | `"127.0.0.1:8080"` | Any non-empty TCP listen address accepted by Go `net.Listen`, such as `"127.0.0.1:8080"` or `"0.0.0.0:8080"` | Address for the admin console and admin API. Unlike `dns.listen`, the host is honored. |
-| `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | Main SQLite database path. The parent directory is created if needed. The database stores admin users, browser sessions, API keys, persisted app config, blocklist subscriptions, groups, clients, local DNS records, and custom DNS rewrite rules. |
+| `storage.path` | string | `"corehole.db"` | Any non-empty SQLite database path | Main SQLite database path. The parent directory is created if needed. The database stores admin users, API keys, persisted app config, blocklist subscriptions, groups, clients, local DNS records, and custom DNS rewrite rules. Browser sessions and refresh jobs use separate databases beside this file. |
 | `storage.audit_path` | string | `"corehole-audit.db"` | Any non-empty SQLite database path | Audit SQLite database path. The parent directory is created if needed. The database stores detailed query log rows, all-time audit action counters, audit privacy settings, and audit retention settings. If omitted in an older config, corehole derives this path beside `storage.path`, for example `corehole.db` becomes `corehole-audit.db`. |
+| `storage.main_read_connections` | integer | `10` | Positive integer | Maximum concurrent connections in the main database's dedicated authentication reader pool. Restart required. |
+| `storage.audit_read_connections` | integer | `10` | Positive integer | Maximum concurrent connections in the dedicated query-log/analytics reader pool. Restart required. |
+| `storage.session_read_connections` | integer | `10` | Positive integer | Maximum concurrent connections in the dedicated browser-session reader pool. Restart required. |
 | `blocking.response` | string | `"null-ip"` | `"nxdomain"`, `"null-ip"`, or `"refused"` | DNS response mode for blocked queries. `null-ip` returns `0.0.0.0` for A queries and `::` for AAAA queries, and NXDOMAIN for other query types. `nxdomain` returns NXDOMAIN. `refused` returns REFUSED. |
 | `blocking.bundled` | boolean | `true` | `true` or `false` | Enables or disables the embedded seed blocklist from `internal/blocklist/seed.txt`. When enabled, bundled entries are combined with entries loaded from `blocking.blocklists`. |
 | `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
@@ -93,17 +96,19 @@ single-database installs are migrated conservatively: new audit writes use
 action counters are copied forward, and old raw `audit_events` rows are left in
 `storage.path` instead of being copied at startup.
 
-The audit database uses one write connection and a separate pool of ten
-read-only connections for query logs, analytics, and settings reads. Inserts
+The audit database uses one write connection and a separate pool controlled by
+`storage.audit_read_connections` (default ten) for query logs, analytics, and settings reads. Inserts
 and cleanup therefore do not consume reader slots. SQLite WAL permits readers
 to continue while a writer is active; expensive queries can still compete for
-the ten reader slots and the host's CPU/disk. Reader connections open lazily
+the reader slots and the host's CPU/disk. Reader connections open lazily
 as demand increases, rather than all being opened at startup.
 
-The main database retains four general-purpose connections, with ten reserved
-read-only connections for authentication reads. Browser sessions use a separate
+The main database retains four general-purpose connections, with
+`storage.main_read_connections` reserved read-only connections for authentication
+(default ten). Browser sessions use a separate
 database beside the main file (`corehole-sessions.db` for `corehole.db`), with
-one write connection and ten read-only connections. This prevents large
+one write connection and `storage.session_read_connections` read-only connections
+(default ten). This prevents large
 blocklist imports from holding up login's session write. Existing unexpired
 sessions are imported once; subsequent restarts do not re-import logged-out
 sessions. Include the session database when backing up session state. If it
@@ -115,6 +120,39 @@ The separate refresh-job database has two general-purpose connections. The
 single-connection compatibility store is used by tests, not `corehole serve`.
 Busy timeout and foreign-key settings are applied to every new connection in
 every pool; reader connections also enforce `query_only`.
+
+All three reader limits default to ten, including when an older YAML or persisted
+JSON configuration omits them. Explicitly configured smaller positive limits are
+allowed; zero (unlimited) and negative values are rejected. Larger limits permit
+more concurrent work but can increase memory, CPU, and disk pressure. They do
+not change writer/general-purpose pool limits or guarantee query latency.
+
+For a fresh database, the YAML bootstrap settings are:
+
+```yaml
+storage:
+  main_read_connections: 10
+  audit_read_connections: 10
+  session_read_connections: 10
+```
+
+For an existing installation, YAML alone does not override persisted settings.
+Use authenticated `PUT /api/config` to change one or more limits, for example:
+
+```sh
+curl -X PUT http://127.0.0.1:8080/api/config \
+  -H "Authorization: Bearer $COREHOLE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{"storage":{"audit_read_connections":20}}'
+sudo systemctl restart corehole.service
+```
+
+Use your actual admin address and API key (or an authenticated session cookie).
+`GET /api/config` returns the saved limits under `storage`. Partial updates
+preserve omitted limits and database paths. Changed limits return
+`restart_required: true` and take effect on restart, not immediately; the saved
+configuration may therefore differ from the currently running pool sizes until
+then. The console does not currently provide dedicated controls for these limits.
 
 Audit retention cleanup removes old detailed `audit_events` rows only from the
 audit database. Corehole defaults detailed audit retention to 48 hours and runs
@@ -181,6 +219,9 @@ table:
 - `dns.dnssec`
 - `dns.conditional_forwarding`
 - `admin.listen`
+- `storage.main_read_connections`
+- `storage.audit_read_connections`
+- `storage.session_read_connections`
 - `blocking.response`
 - `blocking.bundled`
 - `blocking.blocklists`
@@ -194,6 +235,7 @@ address is unchanged and the active update manager has a DNS reloader. If hot
 reload is unavailable, if the DNS listen address changes, or if a change touches
 `admin.listen`, `logging.level`, `logging.format`, or configured blocklist
 paths, the response reports `restart_required: true`.
+Reader-pool limit changes also require restart and do not trigger DNS hot reload.
 
 To force a later startup to seed active config from YAML again, stop corehole and
 delete the persisted app config row from the selected database:
