@@ -30,6 +30,14 @@ func (PlainParser) Parse(ctx context.Context, r io.Reader, source string) ([]Ent
 }
 
 func parseLine(line string, source string) []Entry {
+	// Cosmetic Adblock filters use '#' separators. They must be rejected
+	// before stripping hosts-file comments, or a browser rule could turn
+	// into a deny rule for an entire legitimate website.
+	for _, separator := range []string{"##", "#@#", "#$#", "#?#", "#%#"} {
+		if strings.Contains(line, separator) {
+			return nil
+		}
+	}
 	if beforeComment, _, ok := strings.Cut(line, "#"); ok {
 		line = beforeComment
 	}
@@ -71,6 +79,15 @@ func parseLine(line string, source string) []Entry {
 
 func normalizeEntryDomain(raw string) (string, EntryKind, bool) {
 	domain := normalizeDomainText(raw)
+	// Only domain-wide Adblock filters can be enforced by DNS. Reject
+	// URL paths, resource modifiers and exceptions rather than broadening them.
+	if strings.HasPrefix(domain, "||") && strings.HasSuffix(domain, "^") {
+		domain = strings.TrimSuffix(strings.TrimPrefix(domain, "||"), "^")
+		if !validBlocklistDomain(domain) {
+			return "", "", false
+		}
+		return domain, EntrySuffix, true
+	}
 	if strings.HasPrefix(domain, "*.") {
 		domain = strings.TrimPrefix(domain, "*.")
 		if !validBlocklistDomain(domain) {

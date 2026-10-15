@@ -54,6 +54,67 @@ initAdminPage({
     let filterListsAvailable = false;
     let groupsAvailable = false;
     let configUpdateAvailable = true;
+    let currentJobs = [];
+    let currentFilterResult = {ok: true, data: {lists: []}};
+    let jobPollTimer = 0;
+    let pollingStopped = false;
+    let jobPollInFlight = false;
+
+    function pendingJob(job) {
+      return job && (job.status === "queued" || job.status === "running");
+    }
+
+    function latestJob(listID) {
+      return currentJobs.find(job => String(job.list_id) === String(listID));
+    }
+
+    function acceptJob(job) {
+      currentJobs = [job, ...currentJobs.filter(item => item.id !== job.id)];
+      scheduleJobPoll();
+    }
+
+    function refreshMessage(accepted) {
+      const job = currentJobs.find(item => item.id === accepted.id) || accepted;
+      if (job.status === "succeeded") {
+        return "Blocklist refresh completed and filtering updated.";
+      }
+      if (job.status === "failed") {
+        return "Blocklist refresh failed: " + job.error;
+      }
+      return job.status === "queued" ? "Blocklist refresh queued in the background." : "Blocklist refresh running in the background.";
+    }
+
+    function scheduleJobPoll() {
+      window.clearTimeout(jobPollTimer);
+      if (!pollingStopped && currentJobs.some(pendingJob)) {
+        jobPollTimer = window.setTimeout(pollJobs, 2000);
+      }
+    }
+
+    async function pollJobs() {
+      if (pollingStopped || jobPollInFlight) {
+        return;
+      }
+      jobPollInFlight = true;
+      try {
+        const previous = new Map(currentJobs.map(job => [job.id, job.status]));
+        const result = await fetchJSON("/api/filter/jobs");
+        currentJobs = result.jobs || [];
+        const finished = currentJobs.filter(job => !pendingJob(job) && ["queued", "running"].includes(previous.get(job.id)));
+        if (finished.length) {
+          await refresh();
+          const failed = finished.find(job => job.status === "failed");
+          setUpdated(failed ? "Blocklist refresh failed: " + failed.error : "Blocklist refresh completed and filtering updated.");
+        } else {
+          renderBlocklists(currentConfig, currentFilterResult);
+        }
+      } catch (err) {
+        setUpdated("Refresh status check failed: " + err.message + ". The background job continues.");
+      } finally {
+        jobPollInFlight = false;
+        scheduleJobPoll();
+      }
+    }
 
     configureTemplates({emptyRow: required("#template-empty-row")});
 
@@ -151,6 +212,7 @@ initAdminPage({
 
         const list = row.list;
         const id = pick(list, ["id"]);
+        const job = latestJob(id);
         const sourceCell = cell(listSource(list));
         sourceCell.className = "source-cell";
         tr.appendChild(sourceCell);
@@ -158,14 +220,19 @@ initAdminPage({
         const status = document.createElement("td");
         status.className = "status-cell";
         status.appendChild(pill(boolLabel(Boolean(pick(list, ["enabled"]))), pick(list, ["enabled"]) ? "allow" : "drop"));
+        if (pendingJob(job)) {
+          status.appendChild(pill(job.status === "queued" ? "queued" : job.phase === "reloading" ? "applying" : "refreshing", ""));
+        }
         tr.appendChild(status);
         tr.appendChild(cell(formatTime(pick(list, ["last_updated_at", "lastUpdatedAt"]))));
-        tr.appendChild(cell(pick(list, ["last_error", "lastError"]) || "--"));
+        tr.appendChild(cell(job && job.status === "failed" ? job.error : pick(list, ["last_error", "lastError"]) || "--"));
         tr.appendChild(groupAssignmentCell("lists", id, currentAssignments.get(String(id)), "global", currentGroups, groupsAvailable));
         const actions = document.createElement("td");
         const actionWrap = document.createElement("div");
         actionWrap.className = "table-actions";
-        actionWrap.appendChild(actionButton("Refresh", "refresh", id, "secondary"));
+        const refreshButton = actionButton(pendingJob(job) ? (job.status === "queued" ? "Queued" : "Refreshing…") : "Refresh", "refresh", id, "secondary");
+        refreshButton.disabled = Boolean(pendingJob(job));
+        actionWrap.appendChild(refreshButton);
         actionWrap.appendChild(actionButton(pick(list, ["enabled"]) ? "Disable" : "Enable", "toggle", id, "secondary"));
         actionWrap.appendChild(actionButton("Delete", "delete", id, "danger"));
         actions.appendChild(actionWrap);
@@ -179,22 +246,28 @@ initAdminPage({
     }
 
     async function refreshPage() {
-      const [config, filterLists, groups, blockingStatus] = await Promise.all([
+      const [config, filterLists, groups, blockingStatus, jobs] = await Promise.all([
         fetchOptionalJSON("/api/config"),
         fetchOptionalJSON("/api/filter/lists"),
         fetchOptionalJSON("/api/filter/groups"),
-        fetchOptionalJSON("/api/blocking/status")
+        fetchOptionalJSON("/api/blocking/status"),
+        fetchOptionalJSON("/api/filter/jobs")
       ]);
       if (config.ok) {
         currentConfig = config.data || {};
       }
       currentGroups = groups.ok ? normalizeGroups(groups.data) : [];
       groupsAvailable = groups.ok;
+      if (jobs.ok) {
+        currentJobs = jobs.data.jobs || [];
+      }
+      currentFilterResult = filterLists;
       const filterListItems = filterLists.ok ? normalizeFilterLists(filterLists.data) : [];
       currentAssignments = filterLists.ok ? await loadGroupAssignments("lists", filterListItems) : new Map();
       renderBlockingPause(blockingStatus);
       renderBlocklists(config.ok ? config.data || {} : currentConfig, filterLists);
       setUpdatedStatus("Blocklists");
+      scheduleJobPoll();
     }
 
     async function pauseBlocking() {
@@ -285,8 +358,10 @@ initAdminPage({
           body: JSON.stringify(payload)
         });
         let refreshError = null;
+        let refreshJob = null;
         try {
-          await fetchJSON("/api/filter/lists/" + encodeURIComponent(pick(created, ["id"])) + "/refresh", {method: "POST"});
+          refreshJob = await fetchJSON("/api/filter/lists/" + encodeURIComponent(pick(created, ["id"])) + "/refresh", {method: "POST"});
+          acceptJob(refreshJob);
         } catch (err) {
           refreshError = err;
         }
@@ -295,6 +370,8 @@ initAdminPage({
         await refresh();
         if (refreshError) {
           setUpdated("Blocklist refresh failed: " + refreshError.message);
+        } else {
+          setUpdated(refreshMessage(refreshJob));
         }
       } catch (err) {
         setUpdated("Blocklist create failed: " + err.message);
@@ -355,6 +432,7 @@ initAdminPage({
       }
       const id = pick(list, ["id"]);
       button.disabled = true;
+      let refreshJob = null;
       try {
         if (button.dataset.action === "toggle") {
           await fetchJSON("/api/filter/lists/" + encodeURIComponent(id), {
@@ -363,7 +441,8 @@ initAdminPage({
             body: JSON.stringify(updatePayloadForList(list, !Boolean(pick(list, ["enabled"]))))
           });
         } else if (button.dataset.action === "refresh") {
-          await fetchJSON("/api/filter/lists/" + encodeURIComponent(id) + "/refresh", {method: "POST"});
+          refreshJob = await fetchJSON("/api/filter/lists/" + encodeURIComponent(id) + "/refresh", {method: "POST"});
+          acceptJob(refreshJob);
         } else if (button.dataset.action === "delete") {
           if (!window.confirm("Delete this blocklist?")) {
             button.disabled = false;
@@ -372,6 +451,9 @@ initAdminPage({
           await fetchJSON("/api/filter/lists/" + encodeURIComponent(id), {method: "DELETE"});
         }
         await refresh();
+        if (refreshJob) {
+          setUpdated(refreshMessage(refreshJob));
+        }
       } catch (err) {
         if (button.dataset.action === "refresh") {
           try {
@@ -389,6 +471,16 @@ initAdminPage({
     on(fields.form, "submit", createBlocklist);
     on(fields.body, "click", handleBlocklistAction);
 
-    return {refresh: refreshPage};
+    return {
+      refresh: refreshPage,
+      start() {
+        pollingStopped = false;
+        scheduleJobPoll();
+      },
+      stop() {
+        pollingStopped = true;
+        window.clearTimeout(jobPollTimer);
+      }
+    };
   }
 });

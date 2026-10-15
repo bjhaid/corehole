@@ -15,6 +15,13 @@ Bad.Example.
 0.0.0.0 ads.example tracker.example # inline comment
 :: ipv6.example
 *.Suffix.Example.
+! Adblock comment
+[Adblock Plus 2.0]
+||Adblock.Example^
+||adblock.example/path^
+||modified.example^$third-party
+@@||excepted.example^
+example.com##.advert
 bad_domain.example
 bad example
 192.0.2.1
@@ -31,6 +38,7 @@ bad example
 		{Domain: "tracker.example", Kind: EntryExact, Source: "test-source"},
 		{Domain: "ipv6.example", Kind: EntryExact, Source: "test-source"},
 		{Domain: "suffix.example", Kind: EntrySuffix, Source: "test-source"},
+		{Domain: "adblock.example", Kind: EntrySuffix, Source: "test-source"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("entries mismatch\n got: %#v\nwant: %#v", got, want)

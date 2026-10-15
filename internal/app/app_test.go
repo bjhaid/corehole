@@ -3,13 +3,17 @@ package app
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bjhaid/corehole/internal/audit"
 	"github.com/bjhaid/corehole/internal/blocklist"
 	"github.com/bjhaid/corehole/internal/config"
 	"github.com/bjhaid/corehole/internal/coreplugin"
@@ -18,7 +22,135 @@ import (
 	"github.com/bjhaid/corehole/internal/localdns"
 	"github.com/bjhaid/corehole/internal/storage"
 	"github.com/miekg/dns"
+	"gopkg.in/yaml.v3"
 )
+
+func TestServeForwardsWhenFilterPluginCannotLoad(t *testing.T) {
+	upstreamSocket, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &dns.Server{PacketConn: upstreamSocket, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		res := new(dns.Msg)
+		res.SetReply(req)
+		res.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60}, A: net.ParseIP("192.0.2.123")}}
+		_ = w.WriteMsg(res)
+	})}
+	go func() { _ = upstream.ActivateAndServe() }()
+	defer func() { _ = upstream.Shutdown() }()
+	reserveDNS, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dnsPort := reserveDNS.LocalAddr().(*net.UDPAddr).Port
+	_ = reserveDNS.Close()
+	reserveAdmin, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminAddr := reserveAdmin.Addr().String()
+	_ = reserveAdmin.Close()
+	cfg := testConfig(filepath.Join(t.TempDir(), "corehole.db"))
+	cfg.DNS.Listen = fmt.Sprintf(":%d", dnsPort)
+	cfg.DNS.Resolvers[0].Address = upstreamSocket.LocalAddr().String()
+	cfg.Admin.Listen = adminAddr
+	cfg.Blocking.Blocklists = []string{filepath.Join(t.TempDir(), "unavailable-list.txt")}
+	// An unavailable audit plugin must not prevent DNS forwarding either.
+	cfg.Storage.AuditPath = t.TempDir()
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "corehole.yaml")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- Serve(ctx, []string{"--config", path}) }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-stopped:
+			if err != nil {
+				t.Errorf("Serve shutdown: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("Serve did not stop")
+		}
+		coreplugin.Current().SetDecider(coreplugin.AllowAll{})
+		coreplugin.Current().SetLocalResolver(nil)
+		coreplugin.Current().SetAudit(audit.NoopSink{})
+	}()
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		res, err := client.Get("http://" + adminAddr + "/api/status")
+		if err == nil {
+			_ = res.Body.Close()
+			if res.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("admin listener did not become ready despite optional plugin failure")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	query := new(dns.Msg)
+	query.SetQuestion("forward.example.", dns.TypeA)
+	res, _, err := (&dns.Client{Timeout: time.Second}).Exchange(query, fmt.Sprintf("127.0.0.1:%d", dnsPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rcode != dns.RcodeSuccess || len(res.Answer) != 1 {
+		t.Fatalf("fail-open DNS response: %s", res)
+	}
+	if answer, ok := res.Answer[0].(*dns.A); !ok || !answer.A.Equal(net.ParseIP("192.0.2.123")) {
+		t.Fatalf("wrong upstream answer: %s", res)
+	}
+}
+
+func TestFilterLoaderServesWhileBlockedAndActivatesWhenReady(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := &delayedBlocklistSource{entered: make(chan struct{}), release: make(chan struct{})}
+	manager := blocklist.NewManagerWithBundledAndSources(nil, false, source)
+	runtime := coreplugin.NewRuntime()
+	reloader := &runtimeBlocklistReloader{manager: manager, runtime: runtime}
+	done := startPlugin(ctx, "filtering", reloader.Reload)
+	<-source.entered
+	select {
+	case <-done:
+		t.Fatal("loader completed before source was ready")
+	default:
+	}
+	query := coreholedns.Query{Name: "ads.example."}
+	if got := runtime.Decide(ctx, query); got.Action != coreholedns.ActionAllow {
+		t.Fatalf("unready plugin must fail open: %+v", got)
+	}
+	close(source.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("loader did not activate")
+	}
+	if got := runtime.Decide(ctx, query); got.Action != coreholedns.ActionBlock {
+		t.Fatalf("ready plugin did not block: %+v", got)
+	}
+}
+
+type delayedBlocklistSource struct{ entered, release chan struct{} }
+
+func (s *delayedBlocklistSource) Entries(ctx context.Context) ([]blocklist.Entry, error) {
+	close(s.entered)
+	select {
+	case <-s.release:
+		return []blocklist.Entry{{Domain: "ads.example", Kind: blocklist.EntryExact}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func TestStartupConfigLocalBlocklistBlocksAdzerk(t *testing.T) {
 	ctx := context.Background()
@@ -174,7 +306,11 @@ func TestFilterListRefreshReloadsInstalledRuntimeDecider(t *testing.T) {
 	if _, err := service.RefreshList(ctx, list.ID); err != nil {
 		t.Fatalf("RefreshList() error = %v", err)
 	}
-	reloader := runtimeBlocklistReloader{manager: manager, runtime: runtime}
+	rules := filter.NewRuleDecider(repo, manager)
+	if _, err := service.CreateRule(ctx, filter.Rule{Pattern: "blocked.example.org", Kind: filter.KindDeny, MatchType: filter.MatchSuffix, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	reloader := runtimeBlocklistReloader{manager: manager, rules: rules, runtime: runtime}
 	if err := reloader.Reload(ctx); err != nil {
 		t.Fatalf("Reload() error = %v", err)
 	}
@@ -193,6 +329,10 @@ func TestFilterListRefreshReloadsInstalledRuntimeDecider(t *testing.T) {
 	decision = runtime.Decide(ctx, coreholedns.Query{Name: "adzerk.com."})
 	if decision.Action != coreholedns.ActionAllow {
 		t.Fatalf("runtime decision for disabled adzerk.com. = %q (%s), want allow", decision.Action, decision.Reason)
+	}
+	decision = runtime.Decide(ctx, coreholedns.Query{Name: "blocked.example.org."})
+	if decision.Action != coreholedns.ActionBlock || decision.RuleID == 0 {
+		t.Fatalf("list reload lost custom rule decider: %+v", decision)
 	}
 }
 

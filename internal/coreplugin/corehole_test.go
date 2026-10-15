@@ -2,7 +2,9 @@ package coreplugin
 
 import (
 	"context"
+	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,31 @@ import (
 	"github.com/coredns/coredns/plugin/metadata"
 	"github.com/miekg/dns"
 )
+
+func TestHandlerForwardsWhenLocalPluginFails(t *testing.T) {
+	runtime := Current()
+	runtime.SetDecider(AllowAll{})
+	sink := &recordingAuditSink{}
+	runtime.SetAudit(sink)
+	runtime.SetLocalResolver(failingLocalResolver{})
+	t.Cleanup(func() { runtime.SetLocalResolver(nil); runtime.SetAudit(coreholeaudit.NoopSink{}) })
+	req := new(dns.Msg)
+	req.SetQuestion("forward.example.", dns.TypeA)
+	w := &recordingResponseWriter{remoteAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53000}}
+	rcode, err := (Handler{Next: upstreamMetadataNext{upstream: "192.0.2.1:53"}}).ServeDNS(metadata.ContextWithMetadata(context.Background()), w, req)
+	if err != nil || rcode != dns.RcodeSuccess || w.msg == nil {
+		t.Fatalf("optional plugin prevented forwarding: rcode=%d err=%v", rcode, err)
+	}
+	if sink.event.Upstream != "192.0.2.1:53" || !strings.Contains(sink.event.Reason, "fail open") {
+		t.Fatalf("missing fail-open audit context: %+v", sink.event)
+	}
+}
+
+type failingLocalResolver struct{}
+
+func (failingLocalResolver) Resolve(context.Context, *dns.Msg) (*dns.Msg, bool, error) {
+	return nil, false, errors.New("plugin not ready")
+}
 
 func TestHandlerBlocksCurrentRuntimeDeciderWithNXDOMAIN(t *testing.T) {
 	runtime := Current()

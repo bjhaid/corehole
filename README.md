@@ -17,6 +17,12 @@ blocklists, and subscribed lists managed from SQLite. It blocks matching
 queries, forwards everything else to the configured upstream resolvers, and
 records DNS audit events in SQLite.
 
+DNS and admin listeners start before filtering and local DNS finish loading.
+Requests fail open to upstream DNS while those plugins are unavailable. Ready
+plugins are installed atomically; reloads keep the previous working matcher
+active until the replacement is ready. Plugin load failures are logged and do
+not stop DNS forwarding.
+
 ## Why
 
 Corehole exists because Pi-hole-style DNS filtering is useful, but Pi-hole
@@ -111,6 +117,9 @@ See [docs/configuration.md](docs/configuration.md) for the full YAML reference,
 including field defaults, validation rules, restart caveats, and deployment
 examples.
 
+For Linux service installation, see [the systemd guide](docs/systemd.md) and
+[example unit](contrib/systemd/corehole.service), also included in release archives.
+
 ## Blocklists
 
 corehole ships with a small deterministic seed blocklist under
@@ -120,9 +129,24 @@ startup. Local blocklists referenced by `blocking.blocklists` are loaded in
 addition to the bundled seed list. Set `blocking.bundled: false` to disable the
 seed list.
 
-Blocklists added, refreshed, enabled, disabled, or deleted through the admin
-console or Admin API are persisted in SQLite and reloaded into the DNS runtime
-immediately. Local paths listed in YAML under `blocking.blocklists` are
+Blocklist changes through the admin console or Admin API are persisted in
+SQLite and applied to the DNS runtime. Refreshes are always background jobs:
+`POST /api/filter/lists/{id}/refresh` returns `202 Accepted`, a `Location` header,
+and a job object with `status_url`. Poll that URL to observe `queued`, `running`,
+`succeeded`, or `failed`; a job succeeds only after the new matcher is active.
+The console polls automatically. Closing the page or disconnecting does not
+cancel accepted work, and unfinished jobs resume after a server restart.
+Refreshes run one at a time, and duplicate requests reuse an existing active
+job for the same list. There is no synchronous refresh option or fallback.
+
+Job state is kept in a separate small SQLite database beside the main database
+(`corehole-jobs.db` for `corehole.db`), so importing a large list cannot lock job
+admission or status polling. The queue accepts up to 64 pending/running jobs and
+keeps the most recent 256 job records. `GET /api/filter/jobs` lists jobs, and
+`GET /api/filter/jobs?active=true` lists unfinished jobs. These endpoints require
+the same authentication as the other admin APIs.
+
+Local paths listed in YAML under `blocking.blocklists` are
 bootstrap blocklists loaded from the active persisted config; use the admin
 console/API for runtime-managed lists.
 
@@ -142,6 +166,9 @@ blocked.example
 
 # suffix/wildcard entries are supported
 *.bad.example
+
+# domain-wide Adblock syntax is supported (base domain and subdomains)
+||ads.example^
 ```
 
 Notes:
@@ -150,8 +177,11 @@ Notes:
 - Hosts-file lines start with an IP address followed by one or more domains.
 - Anything after `#` is treated as a comment.
 - Domains are normalized to lowercase and may include a trailing dot.
-- `*.example.com` entries are suffix rules for subdomains under
-  `example.com`.
+- `*.example.com` and `||example.com^` entries match both `example.com` and
+  its subdomains. Browser-only filters (paths, resource modifiers, cosmetic
+  filters, and exceptions) are not supported.
+- A refresh that imports no supported domains reports an error and preserves
+  the previous entries.
 
 ## DNS Smoke Test
 

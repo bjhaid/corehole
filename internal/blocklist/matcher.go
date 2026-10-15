@@ -71,6 +71,9 @@ func (m *MemoryMatcher) matches(exact map[string]struct{}, suffix map[string]str
 	if _, ok := exact[name]; ok {
 		return true
 	}
+	if _, ok := suffix[name]; ok {
+		return true
+	}
 	for i, r := range name {
 		if r != '.' {
 			continue

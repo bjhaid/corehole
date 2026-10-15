@@ -318,7 +318,7 @@ INSERT INTO audit_events (
 			ctx,
 			timestamp.UTC().Format(time.RFC3339Nano),
 			addrString(event.ClientIP),
-			event.QueryName,
+			strings.ToLower(event.QueryName),
 			event.QueryType,
 			string(event.Action),
 			event.Reason,
@@ -419,8 +419,10 @@ func QueryEvents(ctx context.Context, db *sql.DB, opts QueryOptions) ([]Event, e
 		args = append(args, opts.ClientIP)
 	}
 	if opts.QueryName != "" {
-		where = append(where, "query_name = ?")
-		args = append(args, opts.QueryName)
+		// Accept either form of a DNS name while retaining indexed lookups.
+		where = append(where, "query_name IN (?, ?)")
+		name := strings.ToLower(strings.TrimRight(strings.TrimSpace(opts.QueryName), "."))
+		args = append(args, name, name+".")
 	}
 	if opts.HasQueryType {
 		where = append(where, "query_type = ?")

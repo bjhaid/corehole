@@ -35,6 +35,17 @@ func OpenAudit(ctx context.Context, path string) (*SQLiteStore, error) {
 	return open(ctx, path, auditMigrations(), 1)
 }
 
+func JobsPath(mainPath string) string {
+	ext := filepath.Ext(mainPath)
+	return strings.TrimSuffix(mainPath, ext) + "-jobs" + ext
+}
+
+func OpenJobs(ctx context.Context, path string) (*SQLiteStore, error) {
+	return open(ctx, path, []migration{{version: 1, name: "create refresh jobs", statements: []string{
+		`CREATE TABLE IF NOT EXISTS refresh_jobs (id TEXT PRIMARY KEY, payload TEXT NOT NULL)`,
+	}}}, 2)
+}
+
 func open(ctx context.Context, path string, migrations []migration, maxOpenConns int) (*SQLiteStore, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("storage path is required")

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,16 +68,25 @@ func Serve(ctx context.Context, args []string) error {
 	coreholelog.Configure(string(cfg.Logging.EffectiveLevel()), string(cfg.Logging.EffectiveFormat()))
 
 	auditStore, err := storage.OpenAudit(ctx, cfg.Storage.AuditPath)
+	var auditSink audit.Sink = audit.NoopSink{}
+	var auditReader admin.AuditReader
 	if err != nil {
-		return fmt.Errorf("audit storage: %w", err)
-	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = auditStore.Close(closeCtx)
-	}()
-	if err := audit.CopyLegacyMetadata(ctx, store.DB(), auditStore.DB()); err != nil {
-		return fmt.Errorf("audit legacy metadata: %w", err)
+		coreholelog.Warn("audit_unavailable", "fail_open", true, "error", err)
+	} else {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = auditStore.Close(closeCtx)
+		}()
+		if err := audit.CopyLegacyMetadata(ctx, store.DB(), auditStore.DB()); err != nil {
+			coreholelog.Warn("audit_legacy_metadata_unavailable", "error", err)
+		}
+		sink, err := audit.NewSQLiteSink(auditStore.DB())
+		if err != nil {
+			coreholelog.Warn("audit_unavailable", "fail_open", true, "error", err)
+		} else {
+			auditSink, auditReader = sink, sink
+		}
 	}
 
 	blocklist.SetBundledDefault(cfg.Blocking.Bundled)
@@ -84,23 +94,15 @@ func Serve(ctx context.Context, args []string) error {
 	runtime.SetBlockingResponse(cfg.Blocking.Response)
 	applyBlockingPause(runtime, cfg.Blocking)
 	runtime.SetCacheEnabled(cfg.DNS.CacheEnabled())
+	// Forward immediately until the background loaders install ready plugins.
+	runtime.SetDecider(coreplugin.AllowAll{})
+	runtime.SetLocalResolver(nil)
 	filterRepo := filter.NewRepository(store.DB())
 	filterService := filter.NewService(filterRepo)
-	filterStats, err := filterRepo.BlocklistRuntimeStats(ctx)
-	if err != nil {
-		return fmt.Errorf("filter blocklist stats: %w", err)
-	}
-	logConfigSource(*configPath, initResult.Source, bootstrapCfg, cfg, filterStats)
 	blocklistManager := blocklist.NewManagerWithBundledAndSources(cfg.Blocking.Blocklists, cfg.Blocking.Bundled, filter.NewBlocklistSource(filterRepo))
-	if err := blocklistManager.Reload(ctx); err != nil {
-		return err
-	}
-	runtime.SetDecider(blocklistManager)
+	ruleDecider := filter.NewRuleDecider(filterRepo, blocklistManager)
+	filterReloader := &runtimeBlocklistReloader{manager: blocklistManager, rules: ruleDecider, runtime: runtime}
 
-	auditSink, err := audit.NewSQLiteSink(auditStore.DB())
-	if err != nil {
-		return fmt.Errorf("audit sink: %w", err)
-	}
 	runtime.SetAudit(auditSink)
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -113,10 +115,26 @@ func Serve(ctx context.Context, args []string) error {
 		store:   localDNSRepo,
 		runtime: runtime,
 	}
-	if err := localDNSReloader.ReloadLocalDNS(ctx); err != nil {
-		return fmt.Errorf("local dns runtime: %w", err)
+	var refreshJobs *admin.RefreshJobs
+	jobsStore, jobsErr := storage.OpenJobs(ctx, storage.JobsPath(cfg.Storage.Path))
+	if jobsErr == nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = jobsStore.Close(closeCtx)
+		}()
+		refreshJobs, jobsErr = admin.NewRefreshJobs(ctx, filterService, filterReloader, jobsStore.DB())
 	}
-
+	if jobsErr != nil {
+		coreholelog.Warn("refresh_jobs_unavailable", "error", jobsErr)
+	}
+	if refreshJobs != nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = refreshJobs.Close(closeCtx)
+		}()
+	}
 	adminListener, err := net.Listen("tcp", cfg.Admin.Listen)
 	if err != nil {
 		return fmt.Errorf("admin server listen %s: %w", cfg.Admin.Listen, err)
@@ -140,14 +158,12 @@ func Serve(ctx context.Context, args []string) error {
 				store:   cfgStore,
 				runtime: runtime,
 			}),
-			admin.WithAuditReader(auditSink),
+			admin.WithAuditReader(auditReader),
 			admin.WithLocalDNSStore(localDNSRepo),
 			admin.WithLocalDNSReloader(localDNSReloader),
 			admin.WithFilterService(filterService),
-			admin.WithFilterReloader(runtimeBlocklistReloader{
-				manager: blocklistManager,
-				runtime: runtime,
-			}),
+			admin.WithFilterReloader(filterReloader),
+			admin.WithRefreshJobs(refreshJobs),
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -159,10 +175,24 @@ func Serve(ctx context.Context, args []string) error {
 		}
 	}()
 
-	logStartup(*configPath, initResult.Source, cfg, blocklistManager.Snapshot(), filterStats)
-
 	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	pluginCtx, cancelPlugins := context.WithCancel(signalCtx)
+	defer cancelPlugins()
+	logListeners(*configPath, initResult.Source, cfg)
+	filterReady := startPlugin(pluginCtx, "filtering", func(ctx context.Context) error {
+		if err := filterReloader.Reload(ctx); err != nil {
+			return err
+		}
+		stats, err := filterRepo.BlocklistRuntimeStats(ctx)
+		if err != nil {
+			coreholelog.Warn("filter_stats_unavailable", "error", err)
+		}
+		logConfigSource(*configPath, initResult.Source, bootstrapCfg, cfg, stats)
+		logBlockingReady(cfg, blocklistManager.Snapshot(), stats)
+		return nil
+	})
+	localReady := startPlugin(pluginCtx, "local_dns", localDNSReloader.ReloadLocalDNS)
 
 	select {
 	case <-signalCtx.Done():
@@ -172,10 +202,44 @@ func Serve(ctx context.Context, args []string) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	cancelPlugins()
+	if refreshJobs != nil {
+		if err := refreshJobs.Close(shutdownCtx); err != nil {
+			coreholelog.Warn("refresh_jobs_shutdown", "error", err)
+		}
+	}
 	if err := adminServer.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
-	return dnsServer.Stop(shutdownCtx)
+	if err := dnsServer.Stop(shutdownCtx); err != nil {
+		return err
+	}
+	for _, done := range []<-chan struct{}{filterReady, localReady} {
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+			return shutdownCtx.Err()
+		}
+	}
+	return nil
+}
+
+// A failed or unfinished loader leaves the runtime's fail-open defaults (or
+// its last working plugin) in place. Listener startup never waits for it.
+func startPlugin(ctx context.Context, name string, load func(context.Context) error) <-chan struct{} {
+	done := make(chan struct{})
+	coreholelog.Info("plugin_loading", "plugin", name, "fail_open", true)
+	go func() {
+		defer close(done)
+		if err := load(ctx); err != nil {
+			if ctx.Err() == nil {
+				coreholelog.Warn("plugin_load_failed", "plugin", name, "fail_open", true, "error", err)
+			}
+			return
+		}
+		coreholelog.Info("plugin_ready", "plugin", name)
+	}()
+	return done
 }
 
 type corednsReloader interface {
@@ -211,11 +275,18 @@ func (a runtimeConfigApplier) ApplyRuntimeConfig(_ context.Context, cfg config.C
 }
 
 type runtimeBlocklistReloader struct {
+	mu      sync.Mutex
 	manager *blocklist.Manager
+	rules   *filter.RuleDecider
 	runtime *coreplugin.Runtime
 }
 
-func (r runtimeBlocklistReloader) Reload(ctx context.Context) error {
+func (r *runtimeBlocklistReloader) Reload(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.manager == nil {
 		return nil
 	}
@@ -226,7 +297,14 @@ func (r runtimeBlocklistReloader) Reload(ctx context.Context) error {
 	if runtime == nil {
 		runtime = coreplugin.Current()
 	}
-	runtime.SetDecider(r.manager)
+	if r.rules != nil {
+		if err := r.rules.Reload(ctx); err != nil {
+			return err
+		}
+		runtime.SetDecider(r.rules)
+	} else {
+		runtime.SetDecider(r.manager)
+	}
 	return nil
 }
 
@@ -355,6 +433,11 @@ func logConfigSource(configPath string, source config.Source, bootstrap config.C
 }
 
 func logStartup(configPath string, source config.Source, cfg config.Config, blocking blocklist.Snapshot, filterStats filter.BlocklistRuntimeStats) {
+	logListeners(configPath, source, cfg)
+	logBlockingReady(cfg, blocking, filterStats)
+}
+
+func logListeners(configPath string, source config.Source, cfg config.Config) {
 	coreholelog.Info("corehole_started", "config", configPath, "config_source", source, "storage", cfg.Storage.Path)
 	coreholelog.Info("admin_listening", "url", "http://"+cfg.Admin.Listen, "listen", cfg.Admin.Listen)
 	coreholelog.Info("dns_listening", "listen", cfg.DNS.Listen, "udp", cfg.DNS.Listen, "tcp", cfg.DNS.Listen)
@@ -368,6 +451,9 @@ func logStartup(configPath string, source config.Source, cfg config.Config, bloc
 			)
 		}
 	}
+}
+
+func logBlockingReady(cfg config.Config, blocking blocklist.Snapshot, filterStats filter.BlocklistRuntimeStats) {
 	coreholelog.Info(
 		"blocking_ready",
 		"response", cfg.Blocking.Response,

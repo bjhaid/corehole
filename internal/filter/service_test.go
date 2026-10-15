@@ -189,6 +189,34 @@ func TestRefreshBadPathSetsLastErrorAndPreservesPreviousRuntimeEntries(t *testin
 	assertFilterDecision(t, manager, "adzerk.com", coreholedns.ActionBlock)
 }
 
+func TestUnsupportedRefreshPreservesEntries(t *testing.T) {
+	ctx := context.Background()
+	repo, closeStore := newTestRepository(t, ctx)
+	defer closeStore()
+	s := NewService(repo)
+	list, err := s.CreateList(ctx, List{Path: writeFilterListFile(t, "good.txt", "||ads.example^\n"), Kind: KindDeny, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RefreshList(ctx, list.ID); err != nil {
+		t.Fatal(err)
+	}
+	list.Path = writeFilterListFile(t, "unsupported.txt", "! Only browser filters\nexample.com##.ads\n")
+	if _, err := s.UpdateList(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RefreshList(ctx, list.ID); err == nil {
+		t.Fatal("expected unsupported list error")
+	}
+	entries, err := s.ListListEntries(ctx, list.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Pattern != "ads.example" || entries[0].MatchType != MatchSuffix {
+		t.Fatalf("refresh lost previous Adblock entry: %+v", entries)
+	}
+}
+
 func assertAssignedGroup(t *testing.T, groups []Group, err error, wantID int64) {
 	t.Helper()
 	if err != nil {

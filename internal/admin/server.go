@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	coreholelog "github.com/bjhaid/corehole/internal/logging"
@@ -12,21 +13,24 @@ import (
 const defaultSessionCookieName = "corehole_admin_session"
 
 type Server struct {
-	userStore      UserStore
-	apiKeys        APIKeyStore
-	sessions       SessionStore
-	hasher         PasswordHasher
-	cookieName     string
-	sessionTTL     time.Duration
-	secureCookie   bool
-	auditReader    AuditReader
-	configSource   ConfigSource
-	blocking       BlockingController
-	localDNS       LocalDNSStore
-	localDNSReload LocalDNSReloader
-	filterService  FilterService
-	filterReloader FilterReloader
-	mux            *http.ServeMux
+	userStore          UserStore
+	apiKeys            APIKeyStore
+	sessions           SessionStore
+	hasher             PasswordHasher
+	cookieName         string
+	sessionTTL         time.Duration
+	secureCookie       bool
+	auditReader        AuditReader
+	configSource       ConfigSource
+	blocking           BlockingController
+	localDNS           LocalDNSStore
+	localDNSReload     LocalDNSReloader
+	filterService      FilterService
+	filterReloader     FilterReloader
+	filterJobsMu       sync.Mutex
+	filterJobs         *RefreshJobs
+	filterJobsProvided bool
+	mux                *http.ServeMux
 }
 
 type Option func(*Server)
@@ -161,6 +165,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/custom-dns/records", s.requireSession(s.handleCustomDNSRecords))
 	s.mux.HandleFunc("/api/custom-dns/records/", s.requireSession(s.handleCustomDNSRecord))
 	s.mux.HandleFunc("/api/filter/lists", s.requireSession(s.handleFilterLists))
+	s.mux.HandleFunc("/api/filter/jobs", s.requireSession(s.handleFilterJobs))
+	s.mux.HandleFunc("/api/filter/jobs/", s.requireSession(s.handleFilterJobs))
 	s.mux.HandleFunc("/api/filter/lists/", s.requireSession(s.handleFilterList))
 	s.mux.HandleFunc("/api/filter/list-entries/", s.requireSession(s.handleFilterListEntry))
 	s.mux.HandleFunc("/api/filter/rules", s.requireSession(s.handleFilterRules))

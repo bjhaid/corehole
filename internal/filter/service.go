@@ -268,6 +268,9 @@ func (s *Service) importListEntries(ctx context.Context, list List) ([]ListEntry
 		seen[key] = struct{}{}
 		entries = append(entries, listEntry)
 	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("filter list %s contains no supported domains; previous entries retained", source)
+	}
 	return entries, nil
 }
 

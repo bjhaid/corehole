@@ -59,6 +59,8 @@ archives:
       - README.md
       - LICENSE
       - docs/configuration.md
+      - docs/systemd.md
+      - contrib/systemd/corehole.service
       - corehole.yaml.example
 
 checksum:

@@ -60,7 +60,7 @@ config source and active blocklist count.
 | `blocking.bundled` | boolean | `true` | `true` or `false` | Enables or disables the embedded seed blocklist from `internal/blocklist/seed.txt`. When enabled, bundled entries are combined with entries loaded from `blocking.blocklists`. |
 | `blocking.paused` | boolean | `false` | `true` or `false` | Starts DNS filtering in a paused state when the persisted config is active. Paused blocking allows queries that would otherwise match deny rules. Prefer the Blocklists page in the admin console for day-to-day pause/resume changes because it updates the running DNS runtime immediately. |
 | `blocking.pause_until` | string | `""` | Empty or RFC3339 timestamp | Optional end time for a timed pause. Empty with `blocking.paused: true` means pause indefinitely. Expired timestamps are ignored by the DNS runtime. |
-| `blocking.blocklists` | list of strings | empty list | Local file paths | Files to open and parse at startup. Entries from these files decide which queries are blocked in addition to any bundled entries. Missing or unreadable files fail startup. |
+| `blocking.blocklists` | list of strings | empty list | Local file paths | Files loaded in the background after listeners start. Entries from these files decide which queries are blocked in addition to bundled entries. Requests fail open until filtering is ready. Missing or unreadable files leave filtering unavailable and log an error; DNS continues forwarding. |
 | `logging.level` | string | `"info"` | `"debug"`, `"info"`, `"warn"`, `"warning"`, `"error"`, or empty | Minimum level for Corehole's own stdout/stderr logs. At the default `info` level, Corehole keeps startup-oriented logs only. `debug` also enables admin access logs, CoreDNS query logs, and CoreDNS error stack traces. `warning` is normalized as `warn`. This does not enable CoreDNS debug mode. |
 | `logging.format` | string | `"text"` | `"text"`, `"json"`, or empty | Output format for process logs. `json` emits structured JSON objects with named fields for Corehole logs and wraps CoreDNS plugin log lines as JSON. In `debug` mode, CoreDNS query logs use a JSON-shaped query format. |
 
@@ -220,10 +220,12 @@ Additional runtime errors can still happen after config validation:
 - an invalid upstream address can cause CoreDNS startup or forwarding failures.
 - DoH upstream addresses with paths are rejected by CoreDNS; use host or
   host:port only and CoreDNS uses `/dns-query`.
-- missing or unreadable blocklist files fail startup.
-- scanner read errors while parsing blocklist files fail startup; invalid
+- missing or unreadable blocklist files leave the filtering plugin unavailable;
+  startup continues and requests fail open to upstream DNS.
+- scanner read errors while parsing blocklist files leave filtering unavailable; invalid
   blocklist entries are ignored.
-- an unwritable database path or parent directory fails storage startup.
+- an unwritable main database path or parent directory fails storage startup.
+  An unavailable audit database disables query logging without stopping DNS.
 
 Common resolver mistake:
 
@@ -424,4 +426,9 @@ Rules:
 - IP-address entries are ignored as block targets.
 - domains with empty labels, labels longer than 63 characters, total length over
   253 characters, underscores, or leading/trailing hyphens are ignored.
-- `*.example.com` creates a suffix rule for subdomains under `example.com`.
+- `*.example.com` and domain-wide Adblock entries such as `||example.com^`
+  match the base domain and its subdomains.
+- Browser-only Adblock filters (paths, resource modifiers, cosmetic filters,
+  and exceptions) are not supported.
+- Refreshing a subscription that contains no supported domains reports an
+  error and retains its previous entries.

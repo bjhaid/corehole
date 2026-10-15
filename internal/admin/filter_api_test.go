@@ -46,6 +46,53 @@ func TestFilterAPIRequiresSession(t *testing.T) {
 	}
 }
 
+func TestFilterRuleAPIUpdatesDNSDecider(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "corehole.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close(ctx) }()
+	repo := filter.NewRepository(store.DB())
+	decider := filter.NewRuleDecider(repo, blocklist.NewMatcherWithBundled(nil, false))
+	if err := decider.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	server := newTestServer(WithFilterService(filter.NewService(repo)), WithFilterReloader(decider))
+	cookie := setupSession(t, server)
+	assertDecision := func(name string, want coreholedns.Action) {
+		t.Helper()
+		if got := decider.Decide(ctx, coreholedns.Query{Name: name}); got.Action != want {
+			t.Fatalf("%s = %+v, want %s", name, got, want)
+		}
+	}
+	payload := map[string]any{"pattern": "blocked.example.org", "kind": "deny", "match_type": "suffix", "enabled": true}
+	created := postJSON(t, server, "/api/filter/rules", payload, cookie)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %s", created.Body.String())
+	}
+	rule := decodeResponse[filter.Rule](t, created)
+	path := "/api/filter/rules/" + strconv.FormatInt(rule.ID, 10)
+	assertDecision("blocked.example.org.", coreholedns.ActionBlock)
+	assertDecision("www.blocked.example.org.", coreholedns.ActionBlock)
+	payload["enabled"] = false
+	if res := putJSON(t, server, path, payload, cookie); res.Code != http.StatusOK {
+		t.Fatalf("disable: %s", res.Body.String())
+	}
+	assertDecision("blocked.example.org.", coreholedns.ActionAllow)
+	payload["enabled"] = true
+	payload["pattern"] = "changed.example"
+	if res := putJSON(t, server, path, payload, cookie); res.Code != http.StatusOK {
+		t.Fatalf("edit: %s", res.Body.String())
+	}
+	assertDecision("changed.example.", coreholedns.ActionBlock)
+	assertDecision("blocked.example.org.", coreholedns.ActionAllow)
+	if res := deleteReq(t, server, path, cookie); res.Code != http.StatusNoContent {
+		t.Fatalf("delete: %s", res.Body.String())
+	}
+	assertDecision("changed.example.", coreholedns.ActionAllow)
+}
+
 func TestFilterAPICRUDSuccess(t *testing.T) {
 	server, closeStore := newFilterAPITestServer(t)
 	defer closeStore()
@@ -173,7 +220,12 @@ func TestFilterAPIRefreshListImportsAndReloadsRuntime(t *testing.T) {
 	if err := manager.Reload(ctx); err != nil {
 		t.Fatalf("initial Reload() error = %v", err)
 	}
-	server := newTestServer(WithFilterService(service), WithFilterReloader(manager))
+	jobs, err := NewRefreshJobs(ctx, service, manager, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = jobs.Close(ctx) }()
+	server := newTestServer(WithFilterService(service), WithFilterReloader(manager), WithRefreshJobs(jobs))
 	cookie := setupSession(t, server)
 	path := filepath.Join(t.TempDir(), "adlist.txt")
 	if err := os.WriteFile(path, []byte("0.0.0.0 adzerk.com\n"), 0o600); err != nil {
@@ -190,10 +242,15 @@ func TestFilterAPIRefreshListImportsAndReloadsRuntime(t *testing.T) {
 	list := decodeResponse[filter.List](t, createList)
 
 	refresh := postJSON(t, server, "/api/filter/lists/"+strconv.FormatInt(list.ID, 10)+"/refresh", nil, cookie)
-	if refresh.Code != http.StatusOK {
-		t.Fatalf("refresh list status code = %d, want %d: %s", refresh.Code, http.StatusOK, refresh.Body.String())
+	if refresh.Code != http.StatusAccepted {
+		t.Fatalf("refresh list status code = %d, want %d: %s", refresh.Code, http.StatusAccepted, refresh.Body.String())
 	}
-	refreshed := decodeResponse[filter.List](t, refresh)
+	job := decodeResponse[RefreshJob](t, refresh)
+	job = waitRefreshJob(t, jobs, job.ID)
+	if job.Status != "succeeded" || job.Result == nil {
+		t.Fatalf("refresh job: %+v", job)
+	}
+	refreshed := *job.Result
 	if refreshed.LastUpdatedAt == nil || refreshed.LastError != "" {
 		t.Fatalf("refreshed list = %#v, want last_updated_at and no error", refreshed)
 	}

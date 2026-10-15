@@ -147,6 +147,8 @@ func TestQueryEventsFiltersSupportedFields(t *testing.T) {
 		{name: "from", opts: QueryOptions{From: base.Add(-time.Second), To: base.Add(time.Second)}},
 		{name: "client ip", opts: QueryOptions{ClientIP: "192.0.2.10"}},
 		{name: "query name", opts: QueryOptions{QueryName: "match.example."}},
+		{name: "query name without root dot", opts: QueryOptions{QueryName: "match.example"}},
+		{name: "query name case insensitive", opts: QueryOptions{QueryName: "MATCH.Example"}},
 		{name: "query type", opts: QueryOptions{QueryType: 28, HasQueryType: true}},
 		{name: "action", opts: QueryOptions{Action: "block"}},
 		{name: "response", opts: QueryOptions{Response: "NXDOMAIN"}},

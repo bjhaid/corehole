@@ -32,21 +32,11 @@ func (h Handler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	state := request.Request{W: w, Req: r}
 	query := toQuery(state, started)
 
+	localLookupFailed := false
 	if response, ok, err := Current().ResolveLocal(ctx, r); err != nil {
-		Current().Audit().Record(ctx, coreholeaudit.Event{
-			Timestamp:    started,
-			ClientIP:     query.ClientIP,
-			QueryName:    query.Name,
-			QueryType:    query.Type,
-			Action:       coreholedns.ActionAllow,
-			Reason:       "local dns lookup failed",
-			Response:     dns.RcodeToString[dns.RcodeServerFailure],
-			Duration:     time.Since(started),
-			CacheStatus:  "bypass",
-			RetryCount:   -1,
-			ForwardError: err.Error(),
-		})
-		return dns.RcodeServerFailure, err
+		// Local DNS is optional. An unavailable plugin must not prevent
+		// the remaining chain from answering the request.
+		localLookupFailed = true
 	} else if ok {
 		_ = w.WriteMsg(response)
 		Current().Audit().Record(ctx, coreholeaudit.Event{
@@ -65,6 +55,9 @@ func (h Handler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}
 
 	decision := Current().Decide(ctx, query)
+	if localLookupFailed {
+		decision.Reason += "; local dns lookup failed (fail open)"
+	}
 
 	if decision.Action == coreholedns.ActionBlock {
 		rcode, response := writeBlockedResponse(w, r, Current().BlockingResponse())

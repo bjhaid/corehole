@@ -251,15 +251,25 @@ func (s *Server) handleFilterListRefresh(w http.ResponseWriter, r *http.Request,
 		methodNotAllowed(w)
 		return
 	}
-	list, err := s.filterService.RefreshList(r.Context(), id)
+	if _, err := s.filterService.GetList(r.Context(), id); err != nil {
+		writeFilterError(w, err, "filter_list_unavailable")
+		return
+	}
+	jobs, err := s.refreshJobs()
 	if err != nil {
-		writeFilterError(w, err, "filter_list_refresh_failed")
+		writeError(w, http.StatusServiceUnavailable, "refresh_jobs_unavailable")
 		return
 	}
-	if !s.reloadFilterRuntime(w, r) {
+	job, err := jobs.Submit(id)
+	if err != nil {
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, "refresh_queue_unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	w.Header().Set("Location", job.StatusURL)
+	w.Header().Set("Retry-After", "2")
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusAccepted, job)
 }
 
 func (s *Server) handleFilterListGroups(w http.ResponseWriter, r *http.Request, listID int64, tail string) {
@@ -427,6 +437,9 @@ func (s *Server) handleFilterRules(w http.ResponseWriter, r *http.Request) {
 			writeFilterError(w, err, "filter_rule_create_failed")
 			return
 		}
+		if !s.reloadFilterRuntime(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusCreated, rule)
 	default:
 		methodNotAllowed(w)
@@ -478,10 +491,16 @@ func (s *Server) handleFilterRule(w http.ResponseWriter, r *http.Request) {
 			writeFilterError(w, err, "filter_rule_update_failed")
 			return
 		}
+		if !s.reloadFilterRuntime(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusOK, rule)
 	case http.MethodDelete:
 		if err := s.filterService.DeleteRule(r.Context(), id); err != nil {
 			writeFilterError(w, err, "filter_rule_delete_failed")
+			return
+		}
+		if !s.reloadFilterRuntime(w, r) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -568,6 +587,9 @@ func (s *Server) handleFilterClients(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			writeFilterError(w, err, "filter_client_create_failed")
+			return
+		}
+		if !s.reloadFilterRuntime(w, r) {
 			return
 		}
 		writeJSON(w, http.StatusCreated, client)
@@ -658,10 +680,16 @@ func (s *Server) handleFilterClient(w http.ResponseWriter, r *http.Request) {
 			writeFilterError(w, err, "filter_client_update_failed")
 			return
 		}
+		if !s.reloadFilterRuntime(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusOK, client)
 	case http.MethodDelete:
 		if err := s.filterService.DeleteClient(r.Context(), id); err != nil {
 			writeFilterError(w, err, "filter_client_delete_failed")
+			return
+		}
+		if !s.reloadFilterRuntime(w, r) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -749,6 +777,9 @@ func (s *Server) handleFilterGroups(w http.ResponseWriter, r *http.Request) {
 			writeFilterError(w, err, "filter_group_create_failed")
 			return
 		}
+		if !s.reloadFilterRuntime(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusCreated, group)
 	default:
 		methodNotAllowed(w)
@@ -794,10 +825,16 @@ func (s *Server) handleFilterGroup(w http.ResponseWriter, r *http.Request) {
 			writeFilterError(w, err, "filter_group_update_failed")
 			return
 		}
+		if !s.reloadFilterRuntime(w, r) {
+			return
+		}
 		writeJSON(w, http.StatusOK, group)
 	case http.MethodDelete:
 		if err := s.filterService.DeleteGroup(r.Context(), id); err != nil {
 			writeFilterError(w, err, "filter_group_delete_failed")
+			return
+		}
+		if !s.reloadFilterRuntime(w, r) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

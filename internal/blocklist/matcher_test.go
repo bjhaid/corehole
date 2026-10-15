@@ -20,7 +20,8 @@ func TestMemoryMatcherExactAndSuffix(t *testing.T) {
 	}{
 		{name: "exact matches exact name", query: "example.com", wantAction: coredns.ActionBlock},
 		{name: "exact ignores subdomain", query: "www.example.com", wantAction: coredns.ActionAllow},
-		{name: "suffix ignores bare domain", query: "example.org", wantAction: coredns.ActionAllow},
+		{name: "suffix matches bare domain", query: "example.org", wantAction: coredns.ActionBlock},
+		{name: "suffix respects label boundary", query: "notexample.org", wantAction: coredns.ActionAllow},
 		{name: "suffix matches subdomain", query: "www.example.org", wantAction: coredns.ActionBlock},
 		{name: "suffix matches deep subdomain", query: "a.b.example.org.", wantAction: coredns.ActionBlock},
 		{name: "query names normalize", query: "ExAmPlE.CoM.", wantAction: coredns.ActionBlock},
