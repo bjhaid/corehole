@@ -81,7 +81,7 @@ func Serve(ctx context.Context, args []string) error {
 		if err := audit.CopyLegacyMetadata(ctx, store.DB(), auditStore.DB()); err != nil {
 			coreholelog.Warn("audit_legacy_metadata_unavailable", "error", err)
 		}
-		sink, err := audit.NewSQLiteSink(auditStore.DB())
+		sink, err := audit.NewSQLiteSink(auditStore.DB(), audit.WithReaderDB(auditStore.ReadDB()))
 		if err != nil {
 			coreholelog.Warn("audit_unavailable", "fail_open", true, "error", err)
 		} else {
@@ -135,6 +135,25 @@ func Serve(ctx context.Context, args []string) error {
 			_ = refreshJobs.Close(closeCtx)
 		}()
 	}
+	// Session writes must not wait for a large filter import's write lock.
+	var sessions admin.SessionStore
+	sessionStore, sessionErr := storage.OpenSessions(ctx, storage.SessionsPath(cfg.Storage.Path))
+	if sessionErr == nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = sessionStore.Close(closeCtx)
+		}()
+		sessionErr = admin.CopyLegacySessions(ctx, store.ReadDB(), sessionStore.DB())
+		if sessionErr == nil {
+			sessions = admin.NewSQLiteSessionStoreWithReader(sessionStore.DB(), sessionStore.ReadDB())
+		}
+	}
+	if sessionErr != nil {
+		coreholelog.Warn("sessions_unavailable", "error", sessionErr)
+		// Keep DNS available, but fail closed for login/session creation.
+		sessions = admin.NewUnavailableSessionStore()
+	}
 	adminListener, err := net.Listen("tcp", cfg.Admin.Listen)
 	if err != nil {
 		return fmt.Errorf("admin server listen %s: %w", cfg.Admin.Listen, err)
@@ -149,8 +168,8 @@ func Serve(ctx context.Context, args []string) error {
 	adminServer := &http.Server{
 		Addr: cfg.Admin.Listen,
 		Handler: admin.NewServer(
-			admin.NewSQLiteUserStore(store.DB()),
-			admin.WithSessionStore(admin.NewSQLiteSessionStore(store.DB())),
+			admin.NewSQLiteUserStoreWithReader(store.DB(), store.ReadDB()),
+			admin.WithSessionStore(sessions),
 			admin.WithSecureCookie(false),
 			admin.WithConfigSnapshot(adminConfigSnapshot(cfg)),
 			admin.WithConfigStoreAndRuntime(cfgStore, dnsRuntimeReloader{server: dnsServer}, runtimeConfigApplier{runtime: runtime}),

@@ -21,6 +21,52 @@ import (
 	"github.com/bjhaid/corehole/internal/storage"
 )
 
+func TestLoginDoesNotWaitForMainDatabaseWriter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	main, err := storage.OpenMain(ctx, filepath.Join(dir, "main.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = main.Close(ctx) }()
+	sessions, err := storage.OpenSessions(ctx, filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sessions.Close(ctx) }()
+	server := newTestServerWithUserStore(NewSQLiteUserStoreWithReader(main.DB(), main.ReadDB()),
+		WithSessionStore(NewSQLiteSessionStoreWithReader(sessions.DB(), sessions.ReadDB())))
+	setupSession(t, server)
+	// Hold a real SQLite write lock, then occupy every remaining general pool
+	// slot. Authentication must use its reserved readers and separate session DB.
+	tx, err := main.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "UPDATE admin_users SET password_hash=password_hash WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < main.DB().Stats().MaxOpenConnections; i++ {
+		conn, err := main.DB().Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"correct password"}`)).WithContext(ctx)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login = %d: %s", res.Code, res.Body.String())
+	}
+	cookie := sessionCookie(t, res)
+	if !NewSQLiteSessionStoreWithReader(sessions.DB(), sessions.ReadDB()).Valid(cookie.Value, time.Now()) {
+		t.Fatal("login session was not persisted")
+	}
+}
+
 func TestStatusBeforeSetup(t *testing.T) {
 	server := newTestServer()
 

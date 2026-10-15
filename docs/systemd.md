@@ -29,7 +29,8 @@ storage:
   audit_path: /var/lib/corehole/corehole-audit.db
 ```
 
-The refresh-job database is created beside the main database automatically.
+The refresh-job and session databases are created beside the main database
+automatically. Preserve them along with the main and audit databases on upgrades.
 All databases and any configured local blocklist files must be accessible to
 the `corehole` user. Keep writable data under `/var/lib/corehole`; the unit
 prevents writes elsewhere and hides home directories. Ensure no other DNS

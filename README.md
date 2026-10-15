@@ -86,7 +86,8 @@ corehole version
 On first run for a SQLite database, the console asks you to create the first
 admin password. Admin users and API keys are persisted in the configured main
 SQLite database and survive restarts as long as `storage.path` points at the
-same database. Browser sessions are stored in SQLite and survive restarts until
+same database. Browser sessions are stored in a separate `corehole-sessions.db`
+beside the main database and survive restarts until
 they expire or are explicitly logged out. Query logs and analytics are stored in
 the audit SQLite database at `storage.audit_path`. After login, use the web
 console to manage blocklists, upstream resolvers, DNSSEC assistance, custom DNS,

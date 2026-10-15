@@ -60,16 +60,21 @@ func (s *MemoryUserStore) AdminPasswordHash(context.Context) (string, error) {
 }
 
 type SQLiteUserStore struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
 }
 
 func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
-	return &SQLiteUserStore{db: db}
+	return NewSQLiteUserStoreWithReader(db, db)
+}
+
+func NewSQLiteUserStoreWithReader(db, readDB *sql.DB) *SQLiteUserStore {
+	return &SQLiteUserStore{db: db, readDB: readDB}
 }
 
 func (s *SQLiteUserStore) IsSetup(ctx context.Context) (bool, error) {
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM admin_users WHERE id = 1").Scan(&count); err != nil {
+	if err := s.readDB.QueryRowContext(ctx, "SELECT COUNT(1) FROM admin_users WHERE id = 1").Scan(&count); err != nil {
 		return false, fmt.Errorf("check admin setup: %w", err)
 	}
 	return count > 0, nil
@@ -98,7 +103,7 @@ func (s *SQLiteUserStore) CreateAdmin(ctx context.Context, passwordHash string) 
 
 func (s *SQLiteUserStore) AdminPasswordHash(ctx context.Context) (string, error) {
 	var passwordHash string
-	err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM admin_users WHERE id = 1").Scan(&passwordHash)
+	err := s.readDB.QueryRowContext(ctx, "SELECT password_hash FROM admin_users WHERE id = 1").Scan(&passwordHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotSetup
 	}

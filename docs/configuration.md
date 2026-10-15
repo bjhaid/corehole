@@ -93,6 +93,28 @@ single-database installs are migrated conservatively: new audit writes use
 action counters are copied forward, and old raw `audit_events` rows are left in
 `storage.path` instead of being copied at startup.
 
+The audit database uses one write connection and a separate pool of two
+read-only connections for query logs, analytics, and settings reads. Inserts
+and cleanup therefore do not consume reader slots. SQLite WAL permits readers
+to continue while a writer is active; expensive queries can still compete for
+the two reader slots and the host's CPU/disk.
+
+The main database retains four general-purpose connections, with two reserved
+read-only connections for authentication reads. Browser sessions use a separate
+database beside the main file (`corehole-sessions.db` for `corehole.db`), with
+one write connection and two read-only connections. This prevents large
+blocklist imports from holding up login's session write. Existing unexpired
+sessions are imported once; subsequent restarts do not re-import logged-out
+sessions. Include the session database when backing up session state. If it
+cannot be opened or imported, authentication fails closed while DNS continues.
+Password verification still performs Argon2id work and can take time on small
+hosts.
+
+The separate refresh-job database has two general-purpose connections. The
+single-connection compatibility store is used by tests, not `corehole serve`.
+Busy timeout and foreign-key settings are applied to every new connection in
+every pool; reader connections also enforce `query_only`.
+
 Audit retention cleanup removes old detailed `audit_events` rows only from the
 audit database. Corehole defaults detailed audit retention to 48 hours and runs
 cleanup automatically in bounded batches while serving. The all-time audit

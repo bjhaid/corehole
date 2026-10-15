@@ -11,6 +11,65 @@ import (
 	"github.com/bjhaid/corehole/internal/storage"
 )
 
+func TestSQLiteSinkUsesIndependentReaderPool(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := storage.OpenAudit(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeStore(t, ctx, store)
+	sink, err := NewSQLiteSink(store.DB(), WithReaderDB(store.ReadDB()), WithBatchSize(1), WithRetentionCleanupInterval(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeSink(t, ctx, sink)
+	tx, err := store.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "UPDATE audit_settings SET privacy_level=privacy_level WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Recent(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Query(ctx, QueryOptions{Limit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Settings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Summary(ctx, SummaryOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Totals(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.RecentClients(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ReadDB().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Close() }()
+	second, err := store.ReadDB().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Close() }()
+	sink.Record(ctx, testEvent(time.Now(), "concurrent.example."))
+	// A full reader pool cannot stop the writer from draining and flushing.
+	if err := sink.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSQLiteSinkFlushesFullBatchAndReturnsRecentEvents(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, ctx)

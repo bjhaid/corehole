@@ -1,11 +1,13 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"sync"
 	"time"
 )
@@ -15,6 +17,15 @@ type SessionStore interface {
 	Valid(token string, now time.Time) bool
 	Delete(token string)
 }
+
+type unavailableSessionStore struct{}
+
+func NewUnavailableSessionStore() SessionStore { return unavailableSessionStore{} }
+func (unavailableSessionStore) Create(time.Time, time.Duration) (string, error) {
+	return "", errors.New("session storage unavailable")
+}
+func (unavailableSessionStore) Valid(string, time.Time) bool { return false }
+func (unavailableSessionStore) Delete(string)                {}
 
 type MemorySessionStore struct {
 	mu       sync.Mutex
@@ -79,15 +90,21 @@ func (s *MemorySessionStore) Delete(token string) {
 }
 
 type SQLiteSessionStore struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
 
 	mu       sync.Mutex
 	sessions map[string]memorySession
 }
 
 func NewSQLiteSessionStore(db *sql.DB) *SQLiteSessionStore {
+	return NewSQLiteSessionStoreWithReader(db, db)
+}
+
+func NewSQLiteSessionStoreWithReader(db, readDB *sql.DB) *SQLiteSessionStore {
 	return &SQLiteSessionStore{
 		db:       db,
+		readDB:   readDB,
 		sessions: make(map[string]memorySession),
 	}
 }
@@ -104,7 +121,9 @@ func (s *SQLiteSessionStore) Create(now time.Time, ttl time.Duration) (string, e
 	expires := now.Add(ttl).UTC()
 
 	if s.db != nil {
-		_, err := s.db.Exec(`
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := s.db.ExecContext(ctx, `
 INSERT INTO admin_sessions (token_hash, created_at, expires_at)
 VALUES (?, ?, ?)`,
 			key,
@@ -137,7 +156,9 @@ func (s *SQLiteSessionStore) Valid(token string, now time.Time) bool {
 	}
 
 	var expiresRaw string
-	err := s.db.QueryRow(`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := s.readDB.QueryRowContext(ctx, `
 SELECT expires_at
 FROM admin_sessions
 WHERE token_hash = ?`, key).Scan(&expiresRaw)
@@ -186,8 +207,55 @@ func (s *SQLiteSessionStore) Delete(token string) {
 	s.mu.Unlock()
 
 	if s.db != nil {
-		_, _ = s.db.Exec("DELETE FROM admin_sessions WHERE token_hash = ?", key)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = s.db.ExecContext(ctx, "DELETE FROM admin_sessions WHERE token_hash = ?", key)
 	}
+}
+
+// CopyLegacySessions runs once. The marker is committed with the copied rows
+// so a later restart cannot resurrect a session deleted from the new database.
+func CopyLegacySessions(ctx context.Context, source, target *sql.DB) error {
+	var imported int
+	if err := target.QueryRowContext(ctx, "SELECT COUNT(*) FROM session_metadata WHERE key='legacy_imported'").Scan(&imported); err != nil {
+		return err
+	}
+	if imported != 0 {
+		return nil
+	}
+	rows, err := source.QueryContext(ctx, "SELECT token_hash, created_at, expires_at FROM admin_sessions WHERE expires_at > ?", time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	type session struct{ hash, created, expires string }
+	var sessions []session
+	for rows.Next() {
+		var s session
+		if err := rows.Scan(&s.hash, &s.created, &s.expires); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		sessions = append(sessions, s)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	tx, err := target.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, s := range sessions {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO admin_sessions(token_hash, created_at, expires_at) VALUES (?,?,?)", s.hash, s.created, s.expires); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO session_metadata(key) VALUES ('legacy_imported')"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func tokenDigest(token string) []byte {

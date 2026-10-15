@@ -109,6 +109,7 @@ func (NoopSink) Close(context.Context) error { return nil }
 
 type SQLiteSink struct {
 	db              *sql.DB
+	readDB          *sql.DB
 	events          chan Event
 	done            chan struct{}
 	stopped         chan struct{}
@@ -123,6 +124,15 @@ type SQLiteSink struct {
 }
 
 type SQLiteSinkOption func(*SQLiteSink)
+
+// WithReaderDB isolates query-log and analytics reads from audit writes.
+func WithReaderDB(db *sql.DB) SQLiteSinkOption {
+	return func(s *SQLiteSink) {
+		if db != nil {
+			s.readDB = db
+		}
+	}
+}
 
 func WithQueueSize(size int) SQLiteSinkOption {
 	return func(s *SQLiteSink) {
@@ -161,6 +171,7 @@ func NewSQLiteSink(db *sql.DB, opts ...SQLiteSinkOption) (*SQLiteSink, error) {
 
 	sink := &SQLiteSink{
 		db:              db,
+		readDB:          db,
 		events:          make(chan Event, 1024),
 		done:            make(chan struct{}),
 		stopped:         make(chan struct{}),
@@ -197,11 +208,11 @@ func (s *SQLiteSink) Dropped() uint64 {
 }
 
 func (s *SQLiteSink) Recent(ctx context.Context, limit int) ([]Event, error) {
-	return RecentEvents(ctx, s.db, limit)
+	return RecentEvents(ctx, s.readDB, limit)
 }
 
 func (s *SQLiteSink) Query(ctx context.Context, opts QueryOptions) ([]Event, error) {
-	return QueryEvents(ctx, s.db, opts)
+	return QueryEvents(ctx, s.readDB, opts)
 }
 
 func (s *SQLiteSink) Close(ctx context.Context) error {

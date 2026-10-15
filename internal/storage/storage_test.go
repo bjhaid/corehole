@@ -8,6 +8,121 @@ import (
 	"time"
 )
 
+func TestEveryPoolConnectionGetsSQLiteSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		open    func(context.Context, string) (*SQLiteStore, error)
+		writers int
+	}{
+		{"main", OpenMain, 4}, {"audit", OpenAudit, 1},
+		{"sessions", OpenSessions, 1}, {"jobs", OpenJobs, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			store, err := tc.open(ctx, filepath.Join(t.TempDir(), "db with ? and #.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = store.Close(ctx) }()
+			for _, pool := range []struct {
+				db             *sql.DB
+				size, readOnly int
+			}{
+				{store.DB(), tc.writers, 0},
+				{store.ReadDB(), store.ReadDB().Stats().MaxOpenConnections, boolInt(store.ReadDB() != store.DB())},
+			} {
+				var conns []*sql.Conn
+				for i := 0; i < pool.size; i++ {
+					conn, err := pool.db.Conn(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					conns = append(conns, conn)
+					defer func() { _ = conn.Close() }()
+					for pragma, want := range map[string]int{"busy_timeout": 5000, "foreign_keys": 1, "query_only": pool.readOnly} {
+						var got int
+						if err := conn.QueryRowContext(ctx, "PRAGMA "+pragma).Scan(&got); err != nil {
+							t.Fatal(err)
+						}
+						if got != want {
+							t.Fatalf("connection %d %s = %d, want %d", i, pragma, got, want)
+						}
+					}
+				}
+				for _, conn := range conns {
+					_ = conn.Close()
+				}
+			}
+		})
+	}
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func TestAuditReadersAndWriterMakeIndependentProgress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := OpenAudit(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close(ctx) }()
+	if store.DB().Stats().MaxOpenConnections != 1 || store.ReadDB().Stats().MaxOpenConnections != 2 {
+		t.Fatal("want one writer and two readers")
+	}
+	if _, err := store.DB().ExecContext(ctx, "CREATE TABLE pool_probe (v INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "INSERT INTO pool_probe VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		conn, err := store.ReadDB().Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
+		var count int
+		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pool_probe").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatal("reader observed uncommitted write")
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO pool_probe VALUES (2)"); err == nil {
+			t.Fatal("reader must reject writes")
+		}
+	}
+	// Both reader slots remain checked out; the writer must still commit.
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuditMemoryStoreSharesSchemaWithReaders(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenAudit(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close(ctx) }()
+	var count int
+	if err := store.ReadDB().QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_events").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenConfiguresSQLiteAndAppliesMigrations(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corehole.db")

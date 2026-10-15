@@ -95,7 +95,7 @@ func DefaultSettings() Settings {
 }
 
 func (s *SQLiteSink) Settings(ctx context.Context) (Settings, error) {
-	return SettingsFromDB(ctx, s.db)
+	return SettingsFromDB(ctx, s.readDB)
 }
 
 func (s *SQLiteSink) SetSettings(ctx context.Context, settings Settings) error {
@@ -111,11 +111,11 @@ func (s *SQLiteSink) CleanupExpiredBatch(ctx context.Context, now time.Time) (in
 }
 
 func (s *SQLiteSink) Summary(ctx context.Context, opts SummaryOptions) (Summary, error) {
-	return QuerySummary(ctx, s.db, opts)
+	return QuerySummary(ctx, s.readDB, opts)
 }
 
 func (s *SQLiteSink) Totals(ctx context.Context) (Totals, error) {
-	return QueryTotals(ctx, s.db)
+	return QueryTotals(ctx, s.readDB)
 }
 
 func (s *SQLiteSink) Stats(ctx context.Context) (Stats, error) {
@@ -130,7 +130,7 @@ func (s *SQLiteSink) Stats(ctx context.Context) (Stats, error) {
 }
 
 func (s *SQLiteSink) RecentClients(ctx context.Context, limit int) ([]ClientSuggestion, error) {
-	return RecentClients(ctx, s.db, limit)
+	return RecentClients(ctx, s.readDB, limit)
 }
 
 func CopyLegacyMetadata(ctx context.Context, source *sql.DB, target *sql.DB) error {

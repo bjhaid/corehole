@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -15,12 +17,15 @@ import (
 
 const defaultAuditRetentionNS = int64(48 * time.Hour)
 
+var memoryDBSequence atomic.Uint64
+
 type Store interface {
 	Close(context.Context) error
 }
 
 type SQLiteStore struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
 }
 
 func Open(ctx context.Context, path string) (*SQLiteStore, error) {
@@ -28,16 +33,88 @@ func Open(ctx context.Context, path string) (*SQLiteStore, error) {
 }
 
 func OpenMain(ctx context.Context, path string) (*SQLiteStore, error) {
-	return open(ctx, path, mainMigrations(), 4)
+	return openWithReaders(ctx, path, mainMigrations(), 4)
 }
 
 func OpenAudit(ctx context.Context, path string) (*SQLiteStore, error) {
-	return open(ctx, path, auditMigrations(), 1)
+	return openWithReaders(ctx, path, auditMigrations(), 1)
+}
+
+// Keep readers out of the writer pool so writes cannot consume every slot.
+// Two readers bound CPU/memory usage on small hosts while allowing independent
+// requests to make progress under WAL.
+func openWithReaders(ctx context.Context, path string, migrations []migration, writers int) (*SQLiteStore, error) {
+	if path == ":memory:" {
+		// A private :memory: database would give each connection a different
+		// schema. Give this store a unique shared in-memory database instead.
+		path = fmt.Sprintf("file:corehole-memory-%d?mode=memory&cache=shared", memoryDBSequence.Add(1))
+	}
+	store, err := open(ctx, path, migrations, writers)
+	if err != nil {
+		return nil, err
+	}
+	dsn, err := sqliteDSN(path, true)
+	if err == nil {
+		store.readDB, err = sql.Open("sqlite", dsn)
+	}
+	if err == nil {
+		store.readDB.SetMaxOpenConns(2)
+		store.readDB.SetMaxIdleConns(2)
+		err = store.readDB.PingContext(ctx)
+	}
+	if err != nil {
+		_ = store.Close(ctx)
+		return nil, fmt.Errorf("open sqlite readers: %w", err)
+	}
+	return store, nil
+}
+
+// Driver parameters are applied to every new connection, not just whichever
+// connection happened to execute startup PRAGMAs.
+func sqliteDSN(path string, readOnly bool) (string, error) {
+	var u *url.URL
+	var err error
+	if strings.HasPrefix(path, "file:") {
+		u, err = url.Parse(path)
+	} else if path == ":memory:" {
+		u = &url.URL{Opaque: path}
+	} else {
+		var abs string
+		abs, err = filepath.Abs(path)
+		u = &url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	}
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	if readOnly {
+		q.Add("_pragma", "query_only(ON)")
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func JobsPath(mainPath string) string {
+	return siblingPath(mainPath, "jobs")
+}
+
+func SessionsPath(mainPath string) string {
+	return siblingPath(mainPath, "sessions")
+}
+
+func siblingPath(mainPath, name string) string {
 	ext := filepath.Ext(mainPath)
-	return strings.TrimSuffix(mainPath, ext) + "-jobs" + ext
+	return strings.TrimSuffix(mainPath, ext) + "-" + name + ext
+}
+
+func OpenSessions(ctx context.Context, path string) (*SQLiteStore, error) {
+	return openWithReaders(ctx, path, []migration{{version: 1, name: "create sessions", statements: []string{
+		`CREATE TABLE IF NOT EXISTS admin_sessions (token_hash TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS admin_sessions_expires_at_idx ON admin_sessions (expires_at)`,
+		`CREATE TABLE IF NOT EXISTS session_metadata (key TEXT PRIMARY KEY)`,
+	}}}, 1)
 }
 
 func OpenJobs(ctx context.Context, path string) (*SQLiteStore, error) {
@@ -54,7 +131,11 @@ func open(ctx context.Context, path string, migrations []migration, maxOpenConns
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", path)
+	dsn, err := sqliteDSN(path, false)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -81,10 +162,21 @@ func (s *SQLiteStore) DB() *sql.DB {
 	return s.db
 }
 
+func (s *SQLiteStore) ReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
+}
+
 func (s *SQLiteStore) Close(ctx context.Context) error {
 	done := make(chan error, 1)
 	go func() {
-		done <- s.db.Close()
+		var readErr error
+		if s.readDB != nil {
+			readErr = s.readDB.Close()
+		}
+		done <- errors.Join(readErr, s.db.Close())
 	}()
 
 	select {
