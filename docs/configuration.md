@@ -93,16 +93,17 @@ single-database installs are migrated conservatively: new audit writes use
 action counters are copied forward, and old raw `audit_events` rows are left in
 `storage.path` instead of being copied at startup.
 
-The audit database uses one write connection and a separate pool of two
+The audit database uses one write connection and a separate pool of ten
 read-only connections for query logs, analytics, and settings reads. Inserts
 and cleanup therefore do not consume reader slots. SQLite WAL permits readers
 to continue while a writer is active; expensive queries can still compete for
-the two reader slots and the host's CPU/disk.
+the ten reader slots and the host's CPU/disk. Reader connections open lazily
+as demand increases, rather than all being opened at startup.
 
-The main database retains four general-purpose connections, with two reserved
+The main database retains four general-purpose connections, with ten reserved
 read-only connections for authentication reads. Browser sessions use a separate
 database beside the main file (`corehole-sessions.db` for `corehole.db`), with
-one write connection and two read-only connections. This prevents large
+one write connection and ten read-only connections. This prevents large
 blocklist imports from holding up login's session write. Existing unexpired
 sessions are imported once; subsequent restarts do not re-import logged-out
 sessions. Include the session database when backing up session state. If it

@@ -25,6 +25,9 @@ func TestEveryPoolConnectionGetsSQLiteSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = store.Close(ctx) }()
+			if store.ReadDB() != store.DB() && store.ReadDB().Stats().MaxOpenConnections != 10 {
+				t.Fatal("dedicated reader pools must allow ten concurrent connections")
+			}
 			for _, pool := range []struct {
 				db             *sql.DB
 				size, readOnly int
@@ -73,8 +76,8 @@ func TestAuditReadersAndWriterMakeIndependentProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close(ctx) }()
-	if store.DB().Stats().MaxOpenConnections != 1 || store.ReadDB().Stats().MaxOpenConnections != 2 {
-		t.Fatal("want one writer and two readers")
+	if store.DB().Stats().MaxOpenConnections != 1 || store.ReadDB().Stats().MaxOpenConnections != 10 {
+		t.Fatal("want one writer and ten readers")
 	}
 	if _, err := store.DB().ExecContext(ctx, "CREATE TABLE pool_probe (v INTEGER)"); err != nil {
 		t.Fatal(err)
@@ -87,7 +90,7 @@ func TestAuditReadersAndWriterMakeIndependentProgress(t *testing.T) {
 	if _, err := tx.ExecContext(ctx, "INSERT INTO pool_probe VALUES (1)"); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < store.ReadDB().Stats().MaxOpenConnections; i++ {
 		conn, err := store.ReadDB().Conn(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -104,7 +107,7 @@ func TestAuditReadersAndWriterMakeIndependentProgress(t *testing.T) {
 			t.Fatal("reader must reject writes")
 		}
 	}
-	// Both reader slots remain checked out; the writer must still commit.
+	// All reader slots remain checked out; the writer must still commit.
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}

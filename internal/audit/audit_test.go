@@ -53,16 +53,13 @@ func TestSQLiteSinkUsesIndependentReaderPool(t *testing.T) {
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	first, err := store.ReadDB().Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
+	for i := 0; i < store.ReadDB().Stats().MaxOpenConnections; i++ {
+		conn, err := store.ReadDB().Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = conn.Close() }()
 	}
-	defer func() { _ = first.Close() }()
-	second, err := store.ReadDB().Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = second.Close() }()
 	sink.Record(ctx, testEvent(time.Now(), "concurrent.example."))
 	// A full reader pool cannot stop the writer from draining and flushing.
 	if err := sink.Close(ctx); err != nil {

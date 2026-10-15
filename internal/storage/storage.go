@@ -16,6 +16,7 @@ import (
 )
 
 const defaultAuditRetentionNS = int64(48 * time.Hour)
+const defaultReaderConnections = 10
 
 var memoryDBSequence atomic.Uint64
 
@@ -41,8 +42,7 @@ func OpenAudit(ctx context.Context, path string) (*SQLiteStore, error) {
 }
 
 // Keep readers out of the writer pool so writes cannot consume every slot.
-// Two readers bound CPU/memory usage on small hosts while allowing independent
-// requests to make progress under WAL.
+// Reader connections are opened lazily, up to the shared reader-pool limit.
 func openWithReaders(ctx context.Context, path string, migrations []migration, writers int) (*SQLiteStore, error) {
 	if path == ":memory:" {
 		// A private :memory: database would give each connection a different
@@ -58,8 +58,8 @@ func openWithReaders(ctx context.Context, path string, migrations []migration, w
 		store.readDB, err = sql.Open("sqlite", dsn)
 	}
 	if err == nil {
-		store.readDB.SetMaxOpenConns(2)
-		store.readDB.SetMaxIdleConns(2)
+		store.readDB.SetMaxOpenConns(defaultReaderConnections)
+		store.readDB.SetMaxIdleConns(defaultReaderConnections)
 		err = store.readDB.PingContext(ctx)
 	}
 	if err != nil {
